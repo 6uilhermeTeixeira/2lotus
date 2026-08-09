@@ -1,2 +1,8 @@
+[project]
+name = "2lotus-vercel-entrypoint"
+version = "0.1.0"
+dependencies = ["fastapi>=0.115,<0.140"]
+requires-python = "~=3.12.0"
+
 [tool.vercel]
-entrypoint = "python-service.api.index:app"
+entrypoint = "api.index:app"
