@@ -1,0 +1,38 @@
+[
+  {
+    "id": "core-zigzag",
+    "name": "Happy Gold ZigZag Scalper",
+    "description": "Componente ZigZag isolado em shadow.",
+    "strategy_profile": "happy_gold_zigzag_scalper",
+    "symbol": "XAUUSD",
+    "timeframe": "M5",
+    "results_file": "results/core-zigzag.json"
+  },
+  {
+    "id": "core-stochastic",
+    "name": "Stochastic Sell 18 UTC",
+    "description": "Componente estocástico sell-only isolado em shadow.",
+    "strategy_profile": "stochastic_sell_session",
+    "symbol": "XAUUSD",
+    "timeframe": "M5",
+    "results_file": "results/core-stochastic.json"
+  },
+  {
+    "id": "core-multitimeframe",
+    "name": "Tendência Multitemporal",
+    "description": "Componente de tendência multitemporal isolado em shadow.",
+    "strategy_profile": "multitimeframe_trend_pullback",
+    "symbol": "XAUUSD",
+    "timeframe": "M5",
+    "results_file": "results/core-multitimeframe.json"
+  },
+  {
+    "id": "core-portfolio",
+    "name": "Happy Gold + Portfólio 7/6 - 100/100",
+    "description": "Portfólio coordenador; único bot elegível ao canário real.",
+    "strategy_profile": "happy_gold_portfolio_100_100",
+    "symbol": "XAUUSD",
+    "timeframe": "M5",
+    "results_file": "results/core-portfolio.json"
+  }
+]
