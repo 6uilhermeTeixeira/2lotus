@@ -1,5 +1,8 @@
 # Production checklist
 
+A especificacao completa das travas, seus valores padrao e o comportamento fail-closed esta em
+[`safety-controls.md`](safety-controls.md).
+
 ## Required before arming
 
 - Dedicated Supabase project with the existing 2Lotus schema and only the four core bot rows.
