@@ -3,7 +3,14 @@ from collections import defaultdict
 from datetime import date
 from pathlib import Path
 
-from .schemas import BotCatalogItem, DailyPnlPoint, ResultsResponse, ResultsSummary, TradeResult
+from .schemas import (
+    BotCatalogItem,
+    DailyPnlPoint,
+    HistoricalReplayResponse,
+    ResultsResponse,
+    ResultsSummary,
+    TradeResult,
+)
 
 
 def _empty_response(source_file: Path) -> ResultsResponse:
@@ -109,3 +116,31 @@ def resolve_bot_results_file(catalog_file: Path, bot: BotCatalogItem) -> Path:
     if not source_file.is_relative_to(data_root):
         raise ValueError("bot results file must remain inside the data directory")
     return source_file
+
+
+def resolve_backtest_snapshot_file(catalog_file: Path, bot_id: str, days: int) -> Path:
+    data_root = catalog_file.parent.resolve()
+    return data_root / "backtests" / f"{bot_id}-{days}.json"
+
+
+def load_static_backtest_snapshot(
+    catalog_file: Path,
+    bot_id: str,
+    days: int,
+) -> HistoricalReplayResponse | None:
+    source_file = resolve_backtest_snapshot_file(catalog_file, bot_id, days)
+    if not source_file.exists():
+        return None
+    return HistoricalReplayResponse.model_validate_json(source_file.read_text(encoding="utf-8"))
+
+
+def save_static_backtest_snapshot(
+    catalog_file: Path,
+    replay: HistoricalReplayResponse,
+    days: int,
+) -> Path:
+    target = resolve_backtest_snapshot_file(catalog_file, replay.bot_id, days)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    compact = replay.model_copy(update={"candles": []})
+    target.write_text(compact.model_dump_json(), encoding="utf-8")
+    return target

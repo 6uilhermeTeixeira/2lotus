@@ -16,7 +16,12 @@ from .config import get_settings
 from .growth import simulate_growth, simulate_tiered_growth
 from .live_guard import apply_live_canary_guard
 from .pages import render_catalog_page, render_comparison_page, render_growth_simulator_page, render_login_page, render_operations_page, render_results_page
-from .results_store import load_bots_catalog, load_results_snapshot, resolve_bot_results_file
+from .results_store import (
+    load_bots_catalog,
+    load_results_snapshot,
+    load_static_backtest_snapshot,
+    resolve_bot_results_file,
+)
 from .security import RateLimit, client_key, rate_limiter, require_same_origin
 from .schemas import BotCatalogItem, CandleIngestRequest, CandleSnapshot, DecisionAction, DecisionRequest, DecisionResponse, EquityComparisonResponse, EquityPoint, EquitySeries, GrowthSimulationRequest, GrowthSimulationResponse, HealthResponse, HistoricalReplayResponse, MarketChartResponse, OperationsResponse, ResultsResponse, ResultsSummary, RuntimeStatusItem, TickIngestRequest, TradeIngestRequest
 from .sqlite_store import SQLiteStore
@@ -295,15 +300,38 @@ def read_comparison(request: Request) -> dict[str, object]:
 def read_equity_comparison(request: Request, symbol: str = "XAUUSD", days: int = 365) -> EquityComparisonResponse:
     _require_api_session(request)
     normalized_symbol = symbol.upper()
-    if days < 1 or days > 365:
-        raise HTTPException(status_code=422, detail="comparison days must be between 1 and 365")
+    if days < 1 or days > 1827:
+        raise HTTPException(status_code=422, detail="comparison days must be between 1 and 1827")
     bots = [bot for bot in _list_bots() if bot.symbol.upper() == normalized_symbol and bot.timeframe.upper() == "M5"]
     if not bots:
         raise HTTPException(status_code=404, detail="no bots configured for symbol")
     series: list[EquitySeries] = []
     missing: list[str] = []
+    if _uses_sqlite_results():
+        store = SQLiteStore(settings)
+        for bot in bots:
+            replay = store.load_backtest_snapshot(bot.id, days)
+            if replay is None:
+                missing.append(bot.id)
+                continue
+            cumulative = 0.0
+            points: list[EquityPoint] = []
+            for point in sorted(replay.daily_pnl, key=lambda item: item.day):
+                cumulative += point.net_pnl
+                points.append(EquityPoint(day=point.day, cumulative_pnl=round(cumulative, 2)))
+            series.append(EquitySeries(bot_id=bot.id, name=bot.name, strategy_profile=bot.strategy_profile, summary=replay.summary, points=points))
+        return EquityComparisonResponse(symbol=normalized_symbol, timeframe="M5", period_days=days, updated_at_utc=datetime.now(timezone.utc), series=series, missing_bot_ids=missing)
     if not _uses_supabase_results():
         for bot in bots:
+            replay = load_static_backtest_snapshot(settings.bots_catalog_path, bot.id, days)
+            if replay is not None:
+                cumulative = 0.0
+                points: list[EquityPoint] = []
+                for point in sorted(replay.daily_pnl, key=lambda item: item.day):
+                    cumulative += point.net_pnl
+                    points.append(EquityPoint(day=point.day, cumulative_pnl=round(cumulative, 2)))
+                series.append(EquitySeries(bot_id=bot.id, name=bot.name, strategy_profile=bot.strategy_profile, summary=replay.summary, points=points))
+                continue
             results = _load_bot_results(bot)
             cumulative = 0.0
             points: list[EquityPoint] = []
@@ -467,11 +495,21 @@ def read_bot_chart(bot_id: str, request: Request) -> MarketChartResponse:
 @app.get("/api/bots/{bot_id}/historical-replay", response_model=HistoricalReplayResponse)
 def read_historical_replay(bot_id: str, request: Request, days: int = 120) -> HistoricalReplayResponse:
     _require_api_session(request)
-    if days < 1 or days > 365:
-        raise HTTPException(status_code=422, detail="replay days must be between 1 and 365")
+    if days < 1 or days > 1827:
+        raise HTTPException(status_code=422, detail="replay days must be between 1 and 1827")
     bot = _find_bot(bot_id, include_archived=True)
+    if _uses_sqlite_results():
+        store = SQLiteStore(settings)
+        replay = store.load_backtest_snapshot(bot.id, days)
+        if replay is None:
+            raise HTTPException(status_code=404, detail="no local historical replay available")
+        replay.candles = store.load_chart(bot.id, bot.symbol, bot.timeframe, settings.chart_cache_limit).candles
+        return replay
     if not _uses_supabase_results():
-        raise HTTPException(status_code=503, detail="historical replay requires DAYTRADE_RESULTS_STORE=SUPABASE")
+        replay = load_static_backtest_snapshot(settings.bots_catalog_path, bot.id, days)
+        if replay is None:
+            raise HTTPException(status_code=404, detail="no static historical replay available")
+        return replay
     store = SupabaseStore(settings)
     replay = _load_or_run_backtest_replay(store, bot, days, include_candles=True)
     if replay is None:

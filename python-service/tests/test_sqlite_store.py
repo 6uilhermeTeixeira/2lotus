@@ -39,7 +39,7 @@ def test_sqlite_persists_market_and_runtime_data_between_connections():
         store.record_decision(decision_request, DecisionResponse(action=DecisionAction.HOLD, reason="test"), 12.5)
 
         reopened = store_at(path)
-        assert reopened.counts() == {"trade_results": 1, "candles": 1, "ticks": 1, "decisions": 1}
+        assert reopened.counts() == {"trade_results": 1, "candles": 1, "ticks": 1, "decisions": 1, "backtest_snapshots": 0}
         assert reopened.load_results("core-portfolio").summary.net_pnl == 1
         chart = reopened.load_chart("core-portfolio", "XAUUSD", "M5", 100)
         assert len(chart.candles) == 1

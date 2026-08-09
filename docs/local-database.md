@@ -52,3 +52,18 @@ Os arquivos `runtime.db-wal` e `runtime.db-shm` sao temporarios e nao devem ser 
 
 A sincronizacao futura enviara apenas candles consolidados, operacoes, decisoes resumidas e metricas
 ao Supabase. Ticks brutos permanecerao locais/arquivados para evitar custo e volume desnecessarios.
+
+## Reconstrucao do backtest M5
+
+O replay consolidado de cinco anos usa candles M5 e nao exige ticks. Execute:
+
+```bash
+DAYTRADE_RESULTS_STORE=SQLITE \
+DAYTRADE_SQLITE_PATH=./data/runtime.db \
+../.venv/bin/python scripts/rebuild_local_backtests.py \
+  --source ../.runtime/market-data/dukascopy/m5/xauusd-m5-bid-2021-08-09-2026-08-09T23-17.csv \
+  --days 1827
+```
+
+Esse replay continua sendo uma aproximacao OHLC. Ticks ainda sao necessarios para validar com maior
+fidelidade stops, trailing, spread variavel e operacoes do ZigZag encerradas dentro do candle M5.

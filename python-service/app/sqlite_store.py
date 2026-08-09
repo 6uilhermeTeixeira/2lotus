@@ -1,11 +1,12 @@
 import json
 import sqlite3
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .config import Settings
 from .results_store import build_results_snapshot
-from .schemas import CandleSnapshot, DecisionRequest, DecisionResponse, MarketChartResponse, ResultsResponse, TickIngestRequest, TradeResult
+from .schemas import CandleSnapshot, DecisionRequest, DecisionResponse, HistoricalReplayResponse, MarketChartResponse, ResultsResponse, TickIngestRequest, TradeResult
 
 
 SCHEMA = """
@@ -61,6 +62,15 @@ CREATE TABLE IF NOT EXISTS decisions (
   PRIMARY KEY (bot_id, request_id)
 );
 CREATE INDEX IF NOT EXISTS idx_decisions_bot_time ON decisions(bot_id, requested_at_utc DESC);
+CREATE TABLE IF NOT EXISTS backtest_snapshots (
+  bot_id TEXT NOT NULL,
+  period_days INTEGER NOT NULL,
+  period_start_utc TEXT NOT NULL,
+  period_end_utc TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  updated_at_utc TEXT NOT NULL,
+  PRIMARY KEY (bot_id, period_days)
+);
 """
 
 
@@ -162,6 +172,25 @@ class SQLiteStore:
         } for row in rows]
         return statuses, []
 
+    def save_backtest_snapshot(self, replay: HistoricalReplayResponse, period_days: int) -> None:
+        payload = replay.model_dump(mode="json")
+        payload["candles"] = []
+        with self.connect() as connection:
+            connection.execute(
+                """INSERT INTO backtest_snapshots(bot_id,period_days,period_start_utc,period_end_utc,payload_json,updated_at_utc)
+                   VALUES(?,?,?,?,?,?) ON CONFLICT(bot_id,period_days) DO UPDATE SET
+                   period_start_utc=excluded.period_start_utc,period_end_utc=excluded.period_end_utc,
+                   payload_json=excluded.payload_json,updated_at_utc=excluded.updated_at_utc""",
+                (replay.bot_id, period_days, replay.period_start_utc.isoformat(), replay.period_end_utc.isoformat(), json.dumps(payload), datetime.now(timezone.utc).isoformat()),
+            )
+
+    def load_backtest_snapshot(self, bot_id: str, period_days: int) -> HistoricalReplayResponse | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM backtest_snapshots WHERE bot_id=? AND period_days=?", (bot_id, period_days)
+            ).fetchone()
+        return HistoricalReplayResponse.model_validate(json.loads(row["payload_json"])) if row else None
+
     def counts(self) -> dict[str, int]:
         with self.connect() as connection:
-            return {table: int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]) for table in ("trade_results", "candles", "ticks", "decisions")}
+            return {table: int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]) for table in ("trade_results", "candles", "ticks", "decisions", "backtest_snapshots")}
