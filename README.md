@@ -16,6 +16,8 @@ lote maximo de `0.01` e uma entrada por dia.
 
 A matriz completa de protecoes, incluindo camada responsavel, valor inicial e comportamento de
 bloqueio, esta em [`docs/safety-controls.md`](docs/safety-controls.md).
+As regras, prioridades e limitacoes das quatro estrategias estao em
+[`docs/strategies.md`](docs/strategies.md).
 
 Nao ative as duas chaves antes do smoke test em conta demo. Backtest e forward test nao garantem
 resultado real, especialmente porque estas operacoes duram segundos e dependem de ticks, spread,

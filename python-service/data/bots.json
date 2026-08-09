@@ -2,8 +2,9 @@
   {
     "id": "core-zigzag",
     "name": "Happy Gold ZigZag Scalper",
-    "description": "Componente ZigZag isolado em shadow.",
+    "description": "Rompimento de pivôs fractais confirmados em M30, executado e monitorado pelo fluxo M5.",
     "strategy_profile": "happy_gold_zigzag_scalper",
+    "strategy_description": "- Agrega candles M5 completos em M30.\n- Detecta pivôs causais com duas velas de confirmação em cada lado.\n- Entra no rompimento do último pivô entre 03:00 e 19:00 UTC.\n- Usa stop de 240 pontos, alvo de 1000 pontos e saída temporal de até 2 candles M5.\n- Permanece em shadow como componente isolado.",
     "symbol": "XAUUSD",
     "timeframe": "M5",
     "results_file": "results/core-zigzag.json"
@@ -11,8 +12,9 @@
   {
     "id": "core-stochastic",
     "name": "Stochastic Sell 18 UTC",
-    "description": "Componente estocástico sell-only isolado em shadow.",
+    "description": "Pullback vendedor com Estocástico 14/3/3, filtro EMA50 e corte de entrada às 18:00 UTC.",
     "strategy_profile": "stochastic_sell_session",
+    "strategy_description": "- Exige preço abaixo da EMA50 no M5.\n- Confirma cruzamento baixista do Estocástico 14/3/3 a partir da região de 65 ou superior.\n- Aceita somente vendas e bloqueia entradas às 18:00 UTC ou depois.\n- Posiciona o stop acima das últimas 3 velas acrescido de 0,25 ATR.\n- Define parcial em 1R e alvo final em 2R; permanece em shadow isoladamente.",
     "symbol": "XAUUSD",
     "timeframe": "M5",
     "results_file": "results/core-stochastic.json"
@@ -20,8 +22,9 @@
   {
     "id": "core-multitimeframe",
     "name": "Tendência Multitemporal",
-    "description": "Componente de tendência multitemporal isolado em shadow.",
+    "description": "Pullback comprador alinhado entre H1, M15 e M5 durante a janela 13:00-16:00 UTC.",
     "strategy_profile": "multitimeframe_trend_pullback",
+    "strategy_description": "- Opera somente compras entre 13:00 e 16:00 UTC.\n- Exige EMA20 acima da EMA50 e inclinada para cima no H1.\n- Exige força H1 mínima de 0,7 ATR e EMA9 acima da EMA21 no M15.\n- Confirma pullback e rejeição sobre a EMA9 no M5.\n- Usa stop de 1,2 ATR, alvo de 0,75R, risco multiplicado por 0,5 e até 12 candles M5.",
     "symbol": "XAUUSD",
     "timeframe": "M5",
     "results_file": "results/core-multitimeframe.json"
@@ -29,8 +32,9 @@
   {
     "id": "core-portfolio",
     "name": "Happy Gold + Portfólio 7/6 - 100/100",
-    "description": "Portfólio coordenador; único bot elegível ao canário real.",
+    "description": "Coordenador que prioriza ZigZag confirmado e combina Tendência Multitemporal com Stochastic Sell.",
     "strategy_profile": "happy_gold_portfolio_100_100",
+    "strategy_description": "- Coordena ZigZag, Tendência Multitemporal e Stochastic Sell no mesmo orçamento de risco.\n- Prioriza o ZigZag confirmado; no portfólio 7/6, Tendência Multitemporal tem prioridade sobre Stochastic.\n- Bloqueia sinais simultâneos em direções opostas.\n- Para Stochastic, exige regime de tendência vendedora.\n- Opera somente entre 06:00 e 19:00 UTC e permite no máximo uma posição XAUUSD.\n- É o único perfil elegível ao canário real, sujeito a todas as proteções de docs/safety-controls.md.",
     "symbol": "XAUUSD",
     "timeframe": "M5",
     "results_file": "results/core-portfolio.json"

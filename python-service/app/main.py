@@ -29,6 +29,7 @@ settings = get_settings()
 app = FastAPI(title=settings.app_name)
 app.mount("/static", StaticFiles(directory=Path(__file__).resolve().parent / "static"), name="static")
 BRAND_ICON_PATH = Path(__file__).resolve().parent / "static" / "brand" / "icon-1-black.png"
+CORE_BOT_IDS = {"core-zigzag", "core-stochastic", "core-multitimeframe", "core-portfolio"}
 
 
 @app.middleware("http")
@@ -81,8 +82,10 @@ def _uses_supabase_results() -> bool:
 
 def _list_bots(active: bool | None = True) -> list[BotCatalogItem]:
     if _uses_supabase_results():
-        return SupabaseStore(settings).list_bots(active)
+        bots = SupabaseStore(settings).list_bots(active)
+        return [bot for bot in bots if bot.id in CORE_BOT_IDS]
     bots = load_bots_catalog(settings.bots_catalog_path)
+    bots = [bot for bot in bots if bot.id in CORE_BOT_IDS]
     return bots if active is None else [bot for bot in bots if bot.active is active]
 
 
@@ -289,11 +292,37 @@ def read_equity_comparison(request: Request, symbol: str = "XAUUSD", days: int =
     bots = [bot for bot in _list_bots() if bot.symbol.upper() == normalized_symbol and bot.timeframe.upper() == "M5"]
     if not bots:
         raise HTTPException(status_code=404, detail="no bots configured for symbol")
-    if not _uses_supabase_results():
-        raise HTTPException(status_code=503, detail="equity comparison requires DAYTRADE_RESULTS_STORE=SUPABASE")
-    store = SupabaseStore(settings)
     series: list[EquitySeries] = []
     missing: list[str] = []
+    if not _uses_supabase_results():
+        for bot in bots:
+            results = _load_bot_results(bot)
+            cumulative = 0.0
+            points: list[EquityPoint] = []
+            for point in sorted(results.daily_pnl, key=lambda item: item.day):
+                cumulative += point.net_pnl
+                points.append(EquityPoint(day=point.day, cumulative_pnl=round(cumulative, 2)))
+            if not points:
+                missing.append(bot.id)
+                continue
+            series.append(
+                EquitySeries(
+                    bot_id=bot.id,
+                    name=bot.name,
+                    strategy_profile=bot.strategy_profile,
+                    summary=results.summary,
+                    points=points,
+                )
+            )
+        return EquityComparisonResponse(
+            symbol=normalized_symbol,
+            timeframe="M5",
+            period_days=days,
+            updated_at_utc=datetime.now(timezone.utc),
+            series=series,
+            missing_bot_ids=missing,
+        )
+    store = SupabaseStore(settings)
     for bot in bots:
         replay = store.load_backtest_snapshot(bot.id, days)
         if replay is not None:
@@ -330,7 +359,7 @@ def read_growth_simulation(
         raise HTTPException(status_code=422, detail="risk per trade must be between 0.01 and 10")
     if not _uses_supabase_results():
         raise HTTPException(status_code=503, detail="growth simulation requires DAYTRADE_RESULTS_STORE=SUPABASE")
-    bot = _find_bot("bot-16", include_archived=True)
+    bot = _find_bot("core-portfolio", include_archived=True)
     replay = SupabaseStore(settings).load_backtest_snapshot(bot.id, 365)
     if replay is None or not _replay_cache_matches_settings(replay, bot):
         raise HTTPException(status_code=503, detail="the annual 0.25 percent replay must be recalculated first")
@@ -354,7 +383,7 @@ def create_growth_simulation(payload: GrowthSimulationRequest, request: Request)
         raise HTTPException(status_code=422, detail="the first tier must start at or below the initial balance")
     if any(tiers[index].risk_per_trade_pct > tiers[index - 1].risk_per_trade_pct for index in range(1, len(tiers))):
         raise HTTPException(status_code=422, detail="risk must stay equal or decrease at higher balance tiers")
-    bot = _find_bot("bot-16")
+    bot = _find_bot("core-portfolio")
     replay = SupabaseStore(settings).load_backtest_snapshot(bot.id, 365)
     if replay is None or not _replay_cache_matches_settings(replay, bot):
         raise HTTPException(status_code=503, detail="the annual replay cache is unavailable or stale")
@@ -372,8 +401,10 @@ def create_growth_simulation(payload: GrowthSimulationRequest, request: Request)
 def read_operations(request: Request) -> OperationsResponse:
     _require_api_session(request)
     bots = _list_bots()
-    store = SupabaseStore(settings)
-    statuses, snapshots = store.load_operations()
+    if _uses_supabase_results():
+        statuses, snapshots = SupabaseStore(settings).load_operations()
+    else:
+        statuses, snapshots = [], []
     status_by_bot = {str(row.get("bot_id")): row for row in statuses}
     snapshot_by_bot = {str(row.get("bot_id")): row for row in snapshots}
     now = datetime.now(timezone.utc)
@@ -417,7 +448,7 @@ def read_bot_chart(bot_id: str, request: Request) -> MarketChartResponse:
     _require_api_session(request)
     bot = _find_bot(bot_id, include_archived=True)
     if not _uses_supabase_results():
-        raise HTTPException(status_code=503, detail="chart data requires DAYTRADE_RESULTS_STORE=SUPABASE")
+        return MarketChartResponse(bot_id=bot.id, symbol=bot.symbol, timeframe=bot.timeframe, candles=[], trades=[])
     return SupabaseStore(settings).load_chart(bot, settings.chart_cache_limit)
 
 
