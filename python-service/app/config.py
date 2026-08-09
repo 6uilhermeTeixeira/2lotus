@@ -86,6 +86,7 @@ class Settings:
         self.session_secret = getenv("DAYTRADE_SESSION_SECRET")
         self.session_max_age_seconds = int(getenv("DAYTRADE_SESSION_MAX_AGE_SECONDS", "43200"))
         self.results_store = getenv("DAYTRADE_RESULTS_STORE", "JSON").upper()
+        self.sqlite_path = Path(getenv("DAYTRADE_SQLITE_PATH", str(service_root / "data" / "runtime.db")))
         self.supabase_url = getenv("DAYTRADE_SUPABASE_URL")
         self.supabase_service_role_key = getenv("DAYTRADE_SUPABASE_SERVICE_ROLE_KEY")
         self.ingest_api_key = getenv("DAYTRADE_INGEST_API_KEY")
@@ -97,8 +98,8 @@ class Settings:
         self._validate()
 
     def _validate(self) -> None:
-        if self.results_store not in {"JSON", "SUPABASE"}:
-            raise ValueError("DAYTRADE_RESULTS_STORE must be JSON or SUPABASE")
+        if self.results_store not in {"JSON", "SQLITE", "SUPABASE"}:
+            raise ValueError("DAYTRADE_RESULTS_STORE must be JSON, SQLITE or SUPABASE")
         if self.fimath_mode not in {"shadow", "live"}:
             raise ValueError("DAYTRADE_FIMATH_MODE must be shadow or live")
         if not 0 < self.risk_per_trade_pct <= 10:

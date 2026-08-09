@@ -1,4 +1,5 @@
 import logging
+import sqlite3
 from copy import copy
 from hmac import compare_digest
 from datetime import datetime, timezone
@@ -18,6 +19,7 @@ from .pages import render_catalog_page, render_comparison_page, render_growth_si
 from .results_store import load_bots_catalog, load_results_snapshot, resolve_bot_results_file
 from .security import RateLimit, client_key, rate_limiter, require_same_origin
 from .schemas import BotCatalogItem, CandleIngestRequest, CandleSnapshot, DecisionAction, DecisionRequest, DecisionResponse, EquityComparisonResponse, EquityPoint, EquitySeries, GrowthSimulationRequest, GrowthSimulationResponse, HealthResponse, HistoricalReplayResponse, MarketChartResponse, OperationsResponse, ResultsResponse, ResultsSummary, RuntimeStatusItem, TickIngestRequest, TradeIngestRequest
+from .sqlite_store import SQLiteStore
 from .strategy import HAPPY_GOLD_COMBINED_PROFILE, WEIGHTED_PORTFOLIO_PROFILES, evaluate_decision
 from .supabase_store import SupabaseRequestError, SupabaseStore
 from .telemetry import StepTimer, emit_event, metrics_snapshot
@@ -80,6 +82,10 @@ def _uses_supabase_results() -> bool:
     return settings.results_store == "SUPABASE"
 
 
+def _uses_sqlite_results() -> bool:
+    return settings.results_store == "SQLITE"
+
+
 def _list_bots(active: bool | None = True) -> list[BotCatalogItem]:
     if _uses_supabase_results():
         bots = SupabaseStore(settings).list_bots(active)
@@ -92,6 +98,8 @@ def _list_bots(active: bool | None = True) -> list[BotCatalogItem]:
 def _load_bot_results(bot: BotCatalogItem) -> ResultsResponse:
     if _uses_supabase_results():
         return SupabaseStore(settings).load_results(bot.id)
+    if _uses_sqlite_results():
+        return SQLiteStore(settings).load_results(bot.id)
     return load_results_snapshot(resolve_bot_results_file(settings.bots_catalog_path, bot))
 
 
@@ -403,6 +411,8 @@ def read_operations(request: Request) -> OperationsResponse:
     bots = _list_bots()
     if _uses_supabase_results():
         statuses, snapshots = SupabaseStore(settings).load_operations()
+    elif _uses_sqlite_results():
+        statuses, snapshots = SQLiteStore(settings).load_operations()
     else:
         statuses, snapshots = [], []
     status_by_bot = {str(row.get("bot_id")): row for row in statuses}
@@ -447,6 +457,8 @@ def read_bot_results(bot_id: str, request: Request) -> ResultsResponse:
 def read_bot_chart(bot_id: str, request: Request) -> MarketChartResponse:
     _require_api_session(request)
     bot = _find_bot(bot_id, include_archived=True)
+    if _uses_sqlite_results():
+        return SQLiteStore(settings).load_chart(bot.id, bot.symbol, bot.timeframe, settings.chart_cache_limit)
     if not _uses_supabase_results():
         return MarketChartResponse(bot_id=bot.id, symbol=bot.symbol, timeframe=bot.timeframe, candles=[], trades=[])
     return SupabaseStore(settings).load_chart(bot, settings.chart_cache_limit)
@@ -480,10 +492,13 @@ def read_legacy_results(request: Request) -> ResultsResponse:
 def ingest_trade(payload: TradeIngestRequest, request: Request, x_2lotus_ingest_key: str | None = Header(default=None)) -> None:
     rate_limiter.check(client_key(request, "ingest"), RateLimit(settings.ingest_rate_limit_per_minute, 60))
     _require_ingest_key(x_2lotus_ingest_key)
-    if not _uses_supabase_results():
-        raise HTTPException(status_code=503, detail="trade ingestion requires DAYTRADE_RESULTS_STORE=SUPABASE")
     _find_bot(payload.bot_id)
-    SupabaseStore(settings).upsert_trade(payload.bot_id, payload.trade)
+    if _uses_supabase_results():
+        SupabaseStore(settings).upsert_trade(payload.bot_id, payload.trade)
+    elif _uses_sqlite_results():
+        SQLiteStore(settings).upsert_trade(payload.bot_id, payload.trade)
+    else:
+        raise HTTPException(status_code=503, detail="trade ingestion requires a persistent results store")
 
 
 @app.post("/api/candles", status_code=204)
@@ -491,23 +506,29 @@ def ingest_candles(payload: CandleIngestRequest, request: Request, x_2lotus_inge
     rate_limiter.check(client_key(request, "ingest"), RateLimit(settings.ingest_rate_limit_per_minute, 60))
     _require_ingest_key(x_2lotus_ingest_key)
     _validate_ingested_candles(payload.candles)
-    if not _uses_supabase_results():
-        raise HTTPException(status_code=503, detail="candle ingestion requires DAYTRADE_RESULTS_STORE=SUPABASE")
     bot = _find_bot(payload.bot_id)
     if bot.symbol != payload.symbol or bot.timeframe != payload.timeframe:
         raise HTTPException(status_code=422, detail="candle symbol or timeframe does not match bot configuration")
-    SupabaseStore(settings).upsert_candles(payload.bot_id, payload.symbol, payload.timeframe, payload.candles)
+    if _uses_supabase_results():
+        SupabaseStore(settings).upsert_candles(payload.bot_id, payload.symbol, payload.timeframe, payload.candles)
+    elif _uses_sqlite_results():
+        SQLiteStore(settings).upsert_candles(payload.bot_id, payload.symbol, payload.timeframe, payload.candles)
+    else:
+        raise HTTPException(status_code=503, detail="candle ingestion requires a persistent results store")
 
 
 @app.post("/api/ticks", status_code=204)
 def ingest_ticks(payload: TickIngestRequest, request: Request, x_2lotus_ingest_key: str | None = Header(default=None)) -> None:
     rate_limiter.check(client_key(request, "tick_ingest"), RateLimit(settings.tick_ingest_rate_limit_per_minute, 60))
     _require_ingest_key(x_2lotus_ingest_key)
-    if not _uses_supabase_results():
-        raise HTTPException(status_code=503, detail="tick ingestion requires DAYTRADE_RESULTS_STORE=SUPABASE")
-    store = SupabaseStore(settings)
-    store.upsert_ticks(payload)
-    store.advance_tick_shadow_trades(payload)
+    if _uses_supabase_results():
+        store = SupabaseStore(settings)
+        store.upsert_ticks(payload)
+        store.advance_tick_shadow_trades(payload)
+    elif _uses_sqlite_results():
+        SQLiteStore(settings).upsert_ticks(payload)
+    else:
+        raise HTTPException(status_code=503, detail="tick ingestion requires a persistent results store")
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -524,7 +545,15 @@ def readiness() -> JSONResponse:
             SupabaseStore(settings).readiness()
         except SupabaseRequestError as error:
             return JSONResponse(status_code=503, content={"status": "not_ready", "checks": {"configuration": "passed", "supabase": error.code}})
-    return JSONResponse(content={"status": "ready", "checks": {"configuration": "passed", "supabase": "passed" if _uses_supabase_results() else "disabled"}})
+    if _uses_sqlite_results():
+        try:
+            SQLiteStore(settings).readiness()
+        except (OSError, sqlite3.Error):
+            return JSONResponse(status_code=503, content={"status": "not_ready", "checks": {"configuration": "passed", "sqlite": "failed"}})
+    checks = {"configuration": "passed", "supabase": "passed" if _uses_supabase_results() else "disabled"}
+    if _uses_sqlite_results():
+        checks["sqlite"] = "passed"
+    return JSONResponse(content={"status": "ready", "checks": checks})
 
 
 @app.get("/api/metrics")
@@ -649,6 +678,8 @@ def decision(payload: DecisionRequest, request: Request, x_2lotus_ingest_key: st
                 store.record_runtime_status(payload.bot_id, request_at=payload.timestamp_utc, candle_at=payload.candles[-1].timestamp_utc if payload.candles else None, action=response.action.value, reason=response.reason, latency_ms=(monotonic() - started_at) * 1000)
             except SupabaseRequestError as telemetry_error:
                 emit_event(run_id=run_id, step="persist_runtime_status", status="failed", error_code=telemetry_error.code, bot_id=payload.bot_id)
+        if _uses_sqlite_results():
+            SQLiteStore(settings).record_decision(payload, response, (monotonic() - started_at) * 1000)
         run_timer.finish(status="passed", bot_id=payload.bot_id, outcome=response.reason)
         return response
     except SupabaseRequestError as error:

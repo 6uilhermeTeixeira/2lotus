@@ -8,3 +8,6 @@ __pycache__/
 .vercel/
 *.pyc
 *.egg-info/
+*.db
+*.db-shm
+*.db-wal

@@ -10,6 +10,7 @@ RUN pip install --no-cache-dir uv && uv sync --frozen --no-dev
 
 COPY app ./app
 COPY data ./data
+COPY scripts ./scripts
 
 RUN useradd --create-home --uid 10001 lotus && chown -R lotus:lotus /app
 USER lotus
