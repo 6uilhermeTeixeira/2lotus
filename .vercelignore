@@ -1,0 +1,9 @@
+.git/
+.runtime/
+.venv/
+.ruff_cache/
+.pytest_cache/
+python-service/data/*.db
+python-service/data/*.db-shm
+python-service/data/*.db-wal
+python-service/**/__pycache__/
