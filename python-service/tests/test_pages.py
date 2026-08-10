@@ -82,8 +82,9 @@ class ComparisonPageTests(unittest.TestCase):
         html = bytes(render_results_page(bot).body).decode("utf-8")
 
         self.assertIn("Validação histórica", html)
-        self.assertIn('<option value="120">120 dias</option>', html)
-        self.assertIn('<option value="365">365 dias</option>', html)
+        self.assertIn('<option value="730">2 anos</option>', html)
+        self.assertIn('<option value="365">1 ano</option>', html)
+        self.assertIn('<option value="183">6 meses</option>', html)
         self.assertIn('<option value="1827" selected>5 anos</option>', html)
         self.assertIn("/api/bots/bot-16/historical-replay?days=", html)
         self.assertIn("Preço e eventos simulados", html)
