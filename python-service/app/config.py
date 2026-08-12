@@ -13,7 +13,7 @@ class Settings:
         self.default_symbol = getenv("DAYTRADE_DEFAULT_SYMBOL", "XAUUSD")
         self.default_timeframe = getenv("DAYTRADE_DEFAULT_TIMEFRAME", "M5")
         self.max_spread_points = float(getenv("DAYTRADE_MAX_SPREAD_POINTS", "50.0"))
-        self.risk_per_trade_pct = float(getenv("DAYTRADE_RISK_PER_TRADE_PCT", "1.0"))
+        self.risk_per_trade_pct = float(getenv("DAYTRADE_RISK_PER_TRADE_PCT", "2.0"))
         self.min_risk_reward = float(getenv("DAYTRADE_MIN_RISK_REWARD", "2.0"))
         self.enable_live_decisions = getenv("DAYTRADE_ENABLE_LIVE_DECISIONS", "false").lower() == "true"
         self.live_canary_armed = getenv("LIVE_CANARY_ARMED", "false").lower() == "true"
@@ -32,7 +32,7 @@ class Settings:
         self.fimath_min_closed_paper_trades = int(getenv("DAYTRADE_FIMATH_MIN_CLOSED_PAPER_TRADES", "30"))
         self.chart_cache_limit = int(getenv("DAYTRADE_CHART_CACHE_LIMIT", "5000"))
         self.backtest_balance = float(getenv("DAYTRADE_BACKTEST_BALANCE", "10000"))
-        self.backtest_spread_points = float(getenv("DAYTRADE_BACKTEST_SPREAD_POINTS", "10"))
+        self.backtest_spread_points = float(getenv("DAYTRADE_BACKTEST_SPREAD_POINTS", "30"))
         self.backtest_point_size = float(getenv("DAYTRADE_BACKTEST_POINT_SIZE", "0.01"))
         self.backtest_value_per_point_per_lot = float(getenv("DAYTRADE_BACKTEST_VALUE_PER_POINT_PER_LOT", "1"))
         self.backtest_candle_limit = int(getenv("DAYTRADE_BACKTEST_CANDLE_LIMIT", "100000"))

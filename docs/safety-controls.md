@@ -10,7 +10,7 @@ ou impede a inicializacao/execucao do EA.
 | --- | --- | --- | --- | --- |
 | Conta MT5 permitida por login | API e EA | `LIVE_CANARY_ACCOUNT_LOGIN`, `AllowedAccountLogin` e `account.login` | Login `0`, portanto invalido | API mantem `hold`; EA falha no `OnInit` se a execucao estiver ligada e o login nao coincidir |
 | Lote maximo de `0.01` | API e EA | `LIVE_CANARY_MAX_LOT` e `MaxLiveLot` | `0.01` | API limita o tamanho promovido; EA aplica novamente `MathMin` e recusa configuracao acima de `0.01` |
-| Uma entrada por dia | EA | `MaxLiveEntriesPerDay=1`, historico diario, simbolo e `StrategyMagicNumber` | Uma entrada | EA conta deals de entrada do dia e bloqueia uma nova ordem ao atingir o limite |
+| Limite diario de entradas opcional | EA | `MaxLiveEntriesPerDay`; `0` desativa o limite, valores positivos ativam bloqueio diario por historico, simbolo e `StrategyMagicNumber` | Desativado (`0`) | Quando configurado acima de zero, o EA conta deals de entrada do dia e bloqueia uma nova ordem ao atingir o limite |
 | Uma posicao simultanea | API e EA | Posicoes do payload e `PositionSelect(_Symbol)` | Nenhuma exposicao adicional permitida | API mantem `hold` quando recebe exposicao; EA sempre consulta a posicao local antes de enviar a ordem |
 | Limite de spread | API e EA | `LIVE_CANARY_MAX_SPREAD_POINTS` e `MaxLiveSpreadPoints` | `15` pontos | API mantem `hold`; EA rele o tick imediatamente antes da ordem e cancela a execucao |
 | SL e TP obrigatorios | API | `stop_loss_price` e `take_profit_price` precisam ser positivos | Obrigatorios | O candidato nao e promovido e permanece `hold` |
@@ -26,8 +26,8 @@ ou impede a inicializacao/execucao do EA.
   exclusivamente em shadow.
 - A verificacao de posicao na API depende de o cliente enviar `positions`. O EA possui a verificacao
   local autoritativa com `PositionSelect`, portanto nao depende desse payload para impedir duplicidade.
-- O limite diario do EA usa o horario do servidor da corretora e conta apenas entradas com o mesmo
-  simbolo e `StrategyMagicNumber`.
+- Quando habilitado com valor acima de zero, o limite diario do EA usa o horario do servidor da
+  corretora e conta apenas entradas com o mesmo simbolo e `StrategyMagicNumber`.
 - O limite de spread e expresso em pontos do simbolo, nao em dolares nem em pips normalizados.
 - Desabilitar Algo Trading no terminal e o corte local imediato. O kill switch da API e o corte remoto.
 

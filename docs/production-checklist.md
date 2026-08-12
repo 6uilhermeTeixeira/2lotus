@@ -15,7 +15,7 @@ A especificacao completa das travas, seus valores padrao e o comportamento fail-
 ## First canary window
 
 - API: `DAYTRADE_ENABLE_LIVE_DECISIONS=true` and `LIVE_CANARY_ARMED=true`.
-- EA: matching `AllowedAccountLogin`, `MaxLiveLot=0.01`, `MaxLiveEntriesPerDay=1`.
+- EA: matching `AllowedAccountLogin`, `MaxLiveLot=0.01`, `MaxLiveEntriesPerDay=0` para remover o limite diario.
 - Human monitoring of the terminal and server logs for the full position lifecycle.
 - Stop immediately on symbol mismatch, stale candles, rejected stops, abnormal spread or API errors.
 

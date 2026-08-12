@@ -12,7 +12,8 @@ Subprojeto operacional isolado para XAUUSD/M5 com quatro perfis:
 O projeto nasce com execucao real desativada em duas camadas. A API exige simultaneamente
 `DAYTRADE_ENABLE_LIVE_DECISIONS=true`, `LIVE_CANARY_ARMED=true`, Supabase disponivel e o login
 MT5 exato. O EA exige `EnableOrderExecution=true` e repete as travas de login, spread, posicao,
-lote maximo de `0.01` e uma entrada por dia.
+lote maximo de `0.01`. O limite diario de entradas do EA fica desativado por padrao
+(`MaxLiveEntriesPerDay=0`).
 
 A matriz completa de protecoes, incluindo camada responsavel, valor inicial e comportamento de
 bloqueio, esta em [`docs/safety-controls.md`](docs/safety-controls.md).

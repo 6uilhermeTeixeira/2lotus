@@ -25,7 +25,7 @@ input bool EnableOrderExecution = false;
 input long AllowedAccountLogin = 0;
 input double MaxLiveLot = 0.01;
 input double MaxLiveSpreadPoints = 15.0;
-input int MaxLiveEntriesPerDay = 1;
+input int MaxLiveEntriesPerDay = 0;
 input bool EnableResultReporting = true;
 input long StrategyMagicNumber = 20260720;
 
@@ -65,7 +65,16 @@ int OnInit()
    MarketBookAdd(_Symbol);
    trade.SetExpertMagicNumber(StrategyMagicNumber);
    CacheConfiguredBots();
-   Print("SyncLeadBridgeEA initialized. Add the service URLs to MT5 WebRequest allowlist.");
+   PrintFormat(
+      "LiveCoreBridgeEA initialized: execution=%s account=%I64d allowed_account=%I64d max_lot=%.2f max_spread_points=%.1f max_entries_day=%d",
+      EnableOrderExecution ? "enabled" : "disabled",
+      AccountInfoInteger(ACCOUNT_LOGIN),
+      AllowedAccountLogin,
+      MaxLiveLot,
+      MaxLiveSpreadPoints,
+      MaxLiveEntriesPerDay
+   );
+   Print("Add the service URLs to the MT5 WebRequest allowlist.");
    return(INIT_SUCCEEDED);
 }
 
@@ -164,7 +173,7 @@ string BuildDecisionPayload(const MqlTick &tick, const string botId)
       "\"candles\":" + SerializeRates(rates, copied) + ","
       "\"positions\":[],"
       "\"account\":{" +
-         "\"login\":" + IntegerToString((int)login) + "," +
+         "\"login\":" + IntegerToString(login) + "," +
          "\"balance\":" + DoubleToString(balance, 2) + ","
          "\"equity\":" + DoubleToString(equity, 2) + ","
          "\"margin_free\":" + DoubleToString(margin_free, 2) + ","
@@ -473,7 +482,7 @@ void TryExecuteDecision(const string response)
       Print("Execution blocked by local spread guard.");
       return;
    }
-   if(CountTodayEntries() >= MaxLiveEntriesPerDay)
+   if(MaxLiveEntriesPerDay > 0 && CountTodayEntries() >= MaxLiveEntriesPerDay)
    {
       Print("Execution blocked by local daily entry cap.");
       return;
@@ -518,6 +527,7 @@ void TryExecuteDecision(const string response)
 
 int CountTodayEntries()
 {
+   if(MaxLiveEntriesPerDay <= 0) return 0;
    datetime now = TimeTradeServer();
    MqlDateTime parts;
    TimeToStruct(now, parts);
