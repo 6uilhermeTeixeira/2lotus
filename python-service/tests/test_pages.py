@@ -1,6 +1,15 @@
 import unittest
 
-from app.pages import render_catalog_page, render_comparison_page, render_growth_simulator_page, render_operations_page, render_results_page
+from app.pages import (
+    render_catalog_page,
+    render_comparison_page,
+    render_growth_simulator_page,
+    render_live_overview_page,
+    render_operations_page,
+    render_results_page,
+    render_security_page,
+    render_trades_page,
+)
 from app.schemas import BotCatalogItem
 
 
@@ -15,11 +24,56 @@ class ComparisonPageTests(unittest.TestCase):
 
         self.assertNotIn("Arquivadas", html)
         self.assertIn('id="equity-chart"', html)
-        self.assertIn("/api/equity-comparison?symbol=XAUUSD", html)
+        self.assertIn("/api/backtest-market-chart?symbol=XAUUSD", html)
+        self.assertIn('data-resolution="1h"', html)
+        self.assertIn('data-days="7"', html)
+        self.assertIn('id="chart-fit"', html)
+        self.assertIn("LotusEquityChart.create", html)
         self.assertIn("Happy Gold ZigZag Scalper", html)
-        self.assertIn('/growth-simulator', html)
+        self.assertNotIn('/growth-simulator', html)
+        self.assertNotIn('/compare', html)
+        nav_html = html[html.index('<nav class="app-nav">'):html.index('</nav>')]
+        navigation = [nav_html.index(label) for label in ('Visão geral', 'Estratégias ativas', 'Operações', 'Saúde operacional', 'Segurança Live Core')]
+        self.assertEqual(navigation, sorted(navigation))
+        self.assertIn('Live workspace', html)
         self.assertIn('/operations', html)
-        self.assertEqual(html.count('class="bot card"'), 6)
+        self.assertEqual(html.count('class="strategy-card-row card"'), 6)
+        self.assertEqual(html.count('class="strategy-family"'), 4)
+        self.assertIn('data-family="zigzag"', html)
+        self.assertIn('data-chart-family-toggle="combined"', html)
+        self.assertIn('data-chart-family-only="stochastic"', html)
+        self.assertIn("live-core:equity-visible-strategies:v1", html)
+        self.assertIn('/static/equity-chart.js?v=2', html)
+        self.assertIn('data-resolution="1d" class="selected"', html)
+        self.assertIn('data-days="365" class="selected"', html)
+
+    def test_live_overview_loads_operational_sources(self) -> None:
+        html = bytes(render_live_overview_page(6).body).decode("utf-8")
+
+        self.assertIn("Visão geral", html)
+        self.assertIn("Estratégias monitoradas", html)
+        self.assertIn("<strong>6</strong>", html)
+        self.assertIn("fetch('/ready')", html)
+        self.assertIn("fetch('/config')", html)
+        self.assertIn("fetch('/api/operations')", html)
+        self.assertIn("fetch('/api/promoted-strategies')", html)
+
+    def test_trades_page_loads_each_strategy_results(self) -> None:
+        html = bytes(render_trades_page().body).decode("utf-8")
+
+        self.assertIn("Operações", html)
+        self.assertIn("fetch('/api/bots')", html)
+        self.assertIn("/results", html)
+        self.assertIn('id="trade-rows"', html)
+
+    def test_security_page_exposes_read_only_gates(self) -> None:
+        html = bytes(render_security_page().body).decode("utf-8")
+
+        self.assertIn("Segurança Live Core", html)
+        self.assertIn("SOMENTE LEITURA", html)
+        self.assertIn("fetch('/config')", html)
+        self.assertIn("fetch('/ready')", html)
+        self.assertIn("fetch('/api/promoted-strategies')", html)
 
     def test_growth_simulator_has_custom_balance_and_risk_controls(self) -> None:
         html = bytes(render_growth_simulator_page().body).decode("utf-8")

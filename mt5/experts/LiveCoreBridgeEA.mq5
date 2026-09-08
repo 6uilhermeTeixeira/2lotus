@@ -4,19 +4,19 @@
 #define IMPULSE_TICK_CAPACITY 65536
 #define IMPULSE_RETENTION_MSC 905000
 
-input string StrategyServiceUrl = "http://127.0.0.1:8000/decision";
-input string HealthcheckUrl = "http://127.0.0.1:8000/health";
-input string TradeResultsUrl = "http://127.0.0.1:8000/api/trades";
-input string CandleCacheUrl = "http://127.0.0.1:8000/api/candles";
+input string StrategyServiceUrl = "http://127.0.0.1:1111/decision";
+input string HealthcheckUrl = "http://127.0.0.1:1111/health";
+input string TradeResultsUrl = "http://127.0.0.1:1111/api/trades";
+input string CandleCacheUrl = "http://127.0.0.1:1111/api/candles";
 input string LotusIngestApiKey = "";
-input string ResultsBotId = "core-portfolio";
-input string StochasticBotId = "core-stochastic";
-input string MultitimeframeBotId = "core-multitimeframe";
-input string ZigZagBotId = "core-zigzag";
-input string PortfolioBotId = "core-portfolio";
+input string ResultsBotId = "core-combined-v3";
+input string StochasticBotId = "core-stochastic-v3";
+input string MultitimeframeBotId = "core-multitimeframe-v3";
+input string ZigZagBotId = "core-zigzag-v3";
+input string PortfolioBotId = "core-combined-v3";
 input string StrategySymbol = "XAUUSD";
 input string StrategyTimeframe = "M5";
-input int HistoryBars = 60;
+input int HistoryBars = 4000;
 input int HistoryCacheBars = 100000;
 input bool RefreshDeepHistoryOnInit = false;
 input int PollIntervalSeconds = 5;

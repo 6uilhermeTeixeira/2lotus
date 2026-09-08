@@ -443,7 +443,13 @@ def _macd_trend_setup_for_candle(request: DecisionRequest) -> Setup | None:
     return _macd_trend_setup(request) if request.candles else None
 
 
-def _stochastic_pullback_setup(request: DecisionRequest) -> Setup | None:
+def _stochastic_pullback_setup(
+    request: DecisionRequest,
+    *,
+    sell_threshold: float = 65,
+    target_rr: float = 2,
+    partial_close_pct: float | None = None,
+) -> Setup | None:
     candles = request.candles
     if len(candles) < 60:
         return None
@@ -462,7 +468,7 @@ def _stochastic_pullback_setup(request: DecisionRequest) -> Setup | None:
         current.close < ema50
         and stochastic_k[-2] >= stochastic_d[-2]
         and stochastic_k[-1] < stochastic_d[-1]
-        and max(stochastic_k[-2], stochastic_d[-2]) >= 65
+        and max(stochastic_k[-2], stochastic_d[-2]) >= sell_threshold
     )
     if not bullish and not bearish:
         return None
@@ -474,7 +480,7 @@ def _stochastic_pullback_setup(request: DecisionRequest) -> Setup | None:
     if stop_distance <= 0:
         return None
     partial = entry + stop_distance if bullish else entry - stop_distance
-    target = entry + stop_distance * 2 if bullish else entry - stop_distance * 2
+    target = entry + stop_distance * target_rr if bullish else entry - stop_distance * target_rr
     return Setup(
         action=action,
         setup_type="stochastic_trend_pullback",
@@ -489,6 +495,7 @@ def _stochastic_pullback_setup(request: DecisionRequest) -> Setup | None:
         ema50=ema50,
         stochastic_k=stochastic_k[-1],
         stochastic_d=stochastic_d[-1],
+        partial_close_pct=partial_close_pct,
     )
 
 
@@ -532,9 +539,19 @@ def _aggregate_complete(candles: list[CandleSnapshot], minutes: int) -> list[Can
     return grouped
 
 
-def _multitimeframe_trend_pullback_setup(request: DecisionRequest) -> Setup | None:
+def _multitimeframe_trend_pullback_setup(
+    request: DecisionRequest,
+    *,
+    strength_min: float = .7,
+    session_start_hour: int = 13,
+    session_end_hour: int = 16,
+    stop_atr: float = 1.2,
+    target_rr: float = .75,
+    max_holding_bars: int = 12,
+) -> Setup | None:
     candles = request.candles
-    if len(candles) < 600 or not time(13, 0) <= request.timestamp_utc.astimezone(timezone.utc).time() < time(16, 0):
+    session_time = request.timestamp_utc.astimezone(timezone.utc).time()
+    if len(candles) < 600 or not time(session_start_hour, 0) <= session_time < time(session_end_hour, 0):
         return None
     hourly = _aggregate_complete(candles, 60)
     fifteen_minute = _aggregate_complete(candles, 15)
@@ -556,7 +573,7 @@ def _multitimeframe_trend_pullback_setup(request: DecisionRequest) -> Setup | No
     current = candles[-1]
     strength = abs(h1_ema20 - h1_ema50) / h1_atr14 if h1_atr14 else 0.0
     bullish = (
-        strength >= .7
+        strength >= strength_min
         and h1_ema20 > h1_ema50
         and h1_ema20 > h1_previous_ema20
         and m15_ema9 > m15_ema21
@@ -570,9 +587,9 @@ def _multitimeframe_trend_pullback_setup(request: DecisionRequest) -> Setup | No
         return None
     action = DecisionAction.BUY
     entry = request.ask
-    stop_distance = atr14 * 1.2
+    stop_distance = atr14 * stop_atr
     stop = entry - stop_distance
-    target = entry + stop_distance * .75
+    target = entry + stop_distance * target_rr
     return Setup(
         action=action,
         setup_type="multitimeframe_trend_pullback",
@@ -587,7 +604,7 @@ def _multitimeframe_trend_pullback_setup(request: DecisionRequest) -> Setup | No
         ema50=ema21,
         partial_close_pct=100.0,
         move_stop_to_breakeven=False,
-        max_holding_bars=12,
+        max_holding_bars=max_holding_bars,
         h1_ema20=h1_ema20,
         h1_ema50=h1_ema50,
         m15_ema9=m15_ema9,
@@ -597,8 +614,37 @@ def _multitimeframe_trend_pullback_setup(request: DecisionRequest) -> Setup | No
     )
 
 
-def _multitimeframe_setup_for_candle(request: DecisionRequest) -> Setup | None:
-    return _multitimeframe_trend_pullback_setup(request) if request.candles else None
+def _multitimeframe_setup_for_candle(
+    request: DecisionRequest, settings: Settings | None = None, strategy_profile: str = "multitimeframe_trend_pullback"
+) -> Setup | None:
+    if not request.candles:
+        return None
+    if strategy_profile == "multitimeframe_trend_pullback_v3_adaptive_shadow":
+        regime = getattr(settings, "multitimeframe_regime_snapshot", None)
+        if regime is None or regime.name == "insufficient_history" or regime.direction == "sell":
+            return None
+        if regime.name in {"range", "transition"}:
+            return _multitimeframe_trend_pullback_setup(
+                request,
+                strength_min=float(getattr(settings, "multitimeframe_v2_strength_min", .5)),
+                session_start_hour=int(getattr(settings, "multitimeframe_v2_session_start_hour", 13)),
+                session_end_hour=int(getattr(settings, "multitimeframe_v2_session_end_hour", 16)),
+                stop_atr=float(getattr(settings, "multitimeframe_v2_stop_atr", 1.2)),
+                target_rr=float(getattr(settings, "multitimeframe_v2_target_rr", 1.25)),
+                max_holding_bars=int(getattr(settings, "multitimeframe_v2_max_holding_bars", 6)),
+            )
+        return _multitimeframe_trend_pullback_setup(request)
+    if strategy_profile != "multitimeframe_trend_pullback_v2_shadow":
+        return _multitimeframe_trend_pullback_setup(request)
+    return _multitimeframe_trend_pullback_setup(
+        request,
+        strength_min=float(getattr(settings, "multitimeframe_v2_strength_min", .5)),
+        session_start_hour=int(getattr(settings, "multitimeframe_v2_session_start_hour", 13)),
+        session_end_hour=int(getattr(settings, "multitimeframe_v2_session_end_hour", 16)),
+        stop_atr=float(getattr(settings, "multitimeframe_v2_stop_atr", 1.2)),
+        target_rr=float(getattr(settings, "multitimeframe_v2_target_rr", 1.25)),
+        max_holding_bars=int(getattr(settings, "multitimeframe_v2_max_holding_bars", 6)),
+    )
 
 
 def _candidate_response(
@@ -810,8 +856,19 @@ def _evaluate_macd_trend(request: DecisionRequest, settings: Settings, strategy_
     )
 
 
-def _evaluate_stochastic_pullback(request: DecisionRequest, settings: Settings, strategy_profile: str) -> DecisionResponse:
-    setup = _stochastic_pullback_setup_for_candle(request)
+def _evaluate_stochastic_pullback(
+    request: DecisionRequest,
+    settings: Settings,
+    strategy_profile: str,
+    *,
+    sell_threshold: float = 65,
+    target_rr: float = 2,
+    partial_close_pct: float | None = None,
+) -> DecisionResponse:
+    setup = _stochastic_pullback_setup(
+        request, sell_threshold=sell_threshold, target_rr=target_rr,
+        partial_close_pct=partial_close_pct,
+    ) if request.candles else None
     checks = [
         RiskCheck(name="symbol_match", passed=request.symbol.upper() == settings.default_symbol.upper(), detail=f"expected={settings.default_symbol}"),
         RiskCheck(name="timeframe_match", passed=request.timeframe.upper() == settings.default_timeframe.upper(), detail=f"expected={settings.default_timeframe}"),
@@ -871,8 +928,101 @@ def _evaluate_stochastic_sell_session(request: DecisionRequest, settings: Settin
     return response
 
 
+def _evaluate_stochastic_sell_v2(request: DecisionRequest, settings: Settings, strategy_profile: str) -> DecisionResponse:
+    sell_threshold = float(getattr(settings, "stochastic_sell_v2_threshold", 85))
+    target_rr = float(getattr(settings, "stochastic_sell_v2_target_rr", 1.25))
+    partial_pct = float(getattr(settings, "stochastic_sell_v2_partial_pct", 50))
+    cutoff_hour = int(getattr(settings, "stochastic_sell_v2_cutoff_hour", 15))
+    response = _evaluate_stochastic_pullback(
+        request, settings, strategy_profile, sell_threshold=sell_threshold,
+        target_rr=target_rr, partial_close_pct=partial_pct,
+    )
+    if not response.metadata.get("candidate"):
+        return response
+    sell_only = response.metadata.get("suggested_action") == DecisionAction.SELL.value
+    before_cutoff = request.timestamp_utc.astimezone(timezone.utc).time() < time(cutoff_hour, 0)
+    response.risk_checks.extend([
+        RiskCheck(name="stochastic_v2_sell_only", passed=sell_only, detail="side=sell"),
+        RiskCheck(name="stochastic_v2_session", passed=before_cutoff, detail=f"entry_before={cutoff_hour:02d}:00_UTC"),
+    ])
+    response.metadata.update({
+        "sell_threshold": sell_threshold, "target_rr": target_rr,
+        "partial_close_pct": partial_pct, "entry_cutoff_hour": cutoff_hour,
+        "experimental_shadow_lock": True,
+    })
+    if not sell_only or not before_cutoff:
+        response.action = DecisionAction.HOLD
+        response.reason = "stochastic_sell_v2_filter_block"
+        response.size = 0.0
+        response.metadata["base_candidate"] = True
+        response.metadata["candidate"] = False
+        return response
+    response.action = DecisionAction.HOLD
+    response.reason = "stochastic_sell_v2_shadow_signal"
+    response.size = 0.0
+    response.risk_checks.append(RiskCheck(name="experimental_shadow_lock", passed=True, detail="execution_permanently_disabled"))
+    return response
+
+
+def _evaluate_stochastic_sell_v3(request: DecisionRequest, settings: Settings, strategy_profile: str) -> DecisionResponse:
+    cutoff_hour = int(getattr(settings, "stochastic_sell_v3_cutoff_hour", 13))
+    signal_request = request.model_copy(update={"candles": request.candles[-60:]})
+    adaptive_settings = copy(settings)
+    adaptive_settings.stochastic_sell_v2_cutoff_hour = cutoff_hour
+    response = _evaluate_stochastic_sell_v2(signal_request, adaptive_settings, strategy_profile)
+    override = getattr(settings, "stochastic_regime_snapshot", None)
+    regime = override if isinstance(override, RegimeSnapshot) else classify_regime(request.candles, settings)
+    regime_allowed = regime.name not in {"insufficient_history"} and not (
+        regime.name == "trend" and regime.direction == "sell"
+    )
+    regime_reason = (
+        f"adaptive_regime_allowed:{regime.name}:{regime.direction}"
+        if regime_allowed else f"adaptive_regime_blocked:{regime.name}:{regime.direction}"
+    )
+    if response.metadata.get("candidate"):
+        response.risk_checks.append(RiskCheck(name="stochastic_v3_adaptive_regime", passed=regime_allowed, detail=regime_reason))
+        if not regime_allowed:
+            response.action = DecisionAction.HOLD
+            response.reason = "stochastic_sell_v3_regime_block"
+            response.size = 0.0
+            response.metadata["base_candidate"] = True
+            response.metadata["candidate"] = False
+    response.metadata.update({
+        "strategy_profile": strategy_profile,
+        "v3_mode": "v2_geometry_adaptive_h1_regime",
+        "adaptive_regime_switch": True,
+        "adaptive_cutoff_hour": cutoff_hour,
+        "adaptive_regime": regime.name,
+        "adaptive_regime_direction": regime.direction,
+        "adaptive_regime_reason": regime_reason,
+        "research_status": "walk_forward_candidate_requires_forward_validation",
+        "experimental_shadow_lock": True,
+    })
+    if response.metadata.get("candidate"):
+        response.reason = "stochastic_sell_v3_adaptive_shadow_signal"
+    return response
+
+
 def _evaluate_multitimeframe_trend_pullback(request: DecisionRequest, settings: Settings, strategy_profile: str) -> DecisionResponse:
-    setup = _multitimeframe_setup_for_candle(request)
+    effective_settings = settings
+    if strategy_profile == "multitimeframe_trend_pullback_v3_adaptive_shadow":
+        override = getattr(settings, "multitimeframe_regime_snapshot", None)
+        regime = override if isinstance(override, RegimeSnapshot) else classify_regime(request.candles, settings)
+        if regime.name == "insufficient_history" or regime.direction == "sell":
+            return DecisionResponse(
+                action=DecisionAction.HOLD,
+                reason="multitimeframe_v3_regime_block",
+                risk_checks=[RiskCheck(name="adaptive_h1_regime", passed=False, detail=f"blocked:{regime.name}:{regime.direction}")],
+                metadata={
+                    "strategy_profile": strategy_profile, "candidate": False,
+                    "adaptive_regime": regime.name, "adaptive_regime_direction": regime.direction,
+                    "experimental_shadow_lock": True,
+                    "research_status": "walk_forward_candidate_requires_forward_validation",
+                },
+            )
+        effective_settings = copy(settings)
+        effective_settings.multitimeframe_regime_snapshot = regime
+    setup = _multitimeframe_setup_for_candle(request, effective_settings, strategy_profile)
     checks = [
         RiskCheck(name="symbol_match", passed=request.symbol.upper() == settings.default_symbol.upper(), detail=f"expected={settings.default_symbol}"),
         RiskCheck(name="timeframe_match", passed=request.timeframe.upper() == settings.default_timeframe.upper(), detail=f"expected={settings.default_timeframe}"),
@@ -895,6 +1045,24 @@ def _evaluate_multitimeframe_trend_pullback(request: DecisionRequest, settings: 
     )
     response.metadata["experimental_shadow_lock"] = True
     response.metadata["research_status"] = "exploratory_requires_forward_validation"
+    if strategy_profile in {"multitimeframe_trend_pullback_v2_shadow", "multitimeframe_trend_pullback_v3_adaptive_shadow"}:
+        response.metadata.update({
+            "strength_min": float(getattr(settings, "multitimeframe_v2_strength_min", .5)),
+            "session_start_hour": int(getattr(settings, "multitimeframe_v2_session_start_hour", 13)),
+            "session_end_hour": int(getattr(settings, "multitimeframe_v2_session_end_hour", 16)),
+            "stop_atr": float(getattr(settings, "multitimeframe_v2_stop_atr", 1.2)),
+            "target_rr": float(getattr(settings, "multitimeframe_v2_target_rr", 1.25)),
+        })
+    if strategy_profile == "multitimeframe_trend_pullback_v3_adaptive_shadow":
+        regime = getattr(effective_settings, "multitimeframe_regime_snapshot")
+        response.reason = "multitimeframe_trend_pullback_v3_adaptive_shadow_signal"
+        response.metadata.update({
+            "v3_mode": "adaptive_v1_v2_h1_regime",
+            "adaptive_regime": regime.name,
+            "adaptive_regime_direction": regime.direction,
+            "adaptive_geometry": "v2" if regime.name in {"range", "transition"} else "v1",
+            "research_status": "walk_forward_candidate_requires_forward_validation",
+        })
     response.risk_checks.append(RiskCheck(name="experimental_shadow_lock", passed=True, detail="execution_permanently_disabled"))
     return response
 
@@ -1098,6 +1266,8 @@ HAPPY_GOLD_TICK_IMPULSE_PROFILE = "happy_gold_tick_impulse_shadow"
 HAPPY_GOLD_ZIGZAG_TICK_CONTEXT_PROFILE = "happy_gold_zigzag_tick_context_shadow"
 HAPPY_GOLD_ZIGZAG_STRUCTURAL_TICK_PROFILE = "happy_gold_zigzag_structural_tick_shadow"
 HAPPY_GOLD_ZIGZAG_NORMALIZED_RANGE_PROFILE = "happy_gold_zigzag_normalized_range_shadow"
+ZIGZAG_SCALPER_V2_PROFILE = "zigzag_scalper_v2_shadow"
+ZIGZAG_SCALPER_V3_PROFILE = "zigzag_scalper_v3_adaptive_shadow"
 HAPPY_GOLD_MULTIWINDOW_TICK_SCORE_PROFILE = "happy_gold_multiwindow_tick_score_shadow"
 HAPPY_GOLD_PIP_SIZE = 0.01
 
@@ -1275,6 +1445,7 @@ def _evaluate_happy_gold_zigzag_structural_tick(
     settings: Settings,
     strategy_profile: str = HAPPY_GOLD_ZIGZAG_STRUCTURAL_TICK_PROFILE,
     normalized_range_max: float | None = None,
+    fixed_lot: float = .10,
 ) -> DecisionResponse:
     setup = _happy_gold_zigzag_setup(request)
     ready = request.indicators.get("impulse_900s_ready") == 1
@@ -1371,10 +1542,10 @@ def _evaluate_happy_gold_zigzag_structural_tick(
         reason=f"{reason_prefix}_shadow_signal" if strategy_profile == HAPPY_GOLD_ZIGZAG_STRUCTURAL_TICK_PROFILE else f"{reason_prefix}_signal",
         strategy_profile=strategy_profile,
     )
-    response.risk_amount = round(setup.stop_points * request.value_per_point_per_lot * .10, 2)
+    response.risk_amount = round(setup.stop_points * request.value_per_point_per_lot * fixed_lot, 2)
     response.metadata.update(metadata | {
         "candidate": True,
-        "suggested_size": .10,
+        "suggested_size": fixed_lot,
         "signal_timeframe": "M30+M5+T900S",
         "fixed_stop_pips": int(research_stop_pips),
         "fixed_target_pips": 1000,
@@ -1408,6 +1579,33 @@ def _evaluate_happy_gold_zigzag_structural_tick(
             "research_status": "walk_forward_candidate_requires_live_broker_tick_forward_validation",
         })
     response.risk_checks.append(RiskCheck(name="experimental_shadow_lock", passed=True, detail="execution_permanently_disabled"))
+    return response
+
+
+def _evaluate_zigzag_scalper_v3(request: DecisionRequest, settings: Settings) -> DecisionResponse:
+    completed = request.candles[:-1]
+    recent = completed[-60:]
+    average_m5_range = fmean(candle.high - candle.low for candle in recent) if len(recent) == 60 else None
+    expansion_threshold = float(getattr(settings, "zigzag_scalper_v3_expansion_threshold", 6.0))
+    expanded = average_m5_range is not None and average_m5_range >= expansion_threshold
+    if expanded:
+        response = _evaluate_happy_gold_zigzag_structural_tick(
+            request, settings, strategy_profile=ZIGZAG_SCALPER_V3_PROFILE, fixed_lot=.40,
+        )
+        mode = "v2_structural_expansion"
+    else:
+        response = _evaluate_happy_gold_zigzag_scalper(request, settings, ZIGZAG_SCALPER_V3_PROFILE)
+        mode = "v1_normal_volatility"
+    response.metadata.update({
+        "strategy_profile": ZIGZAG_SCALPER_V3_PROFILE,
+        "v3_mode": mode,
+        "average_m5_range_60": round(average_m5_range, 6) if average_m5_range is not None else None,
+        "expansion_threshold": expansion_threshold,
+        "adaptive_regime_switch": True,
+        "research_status": "walk_forward_candidate_requires_broker_tick_forward_validation",
+    })
+    if response.metadata.get("candidate"):
+        response.reason = "zigzag_scalper_v3_adaptive_shadow_signal"
     return response
 
 
@@ -1579,6 +1777,7 @@ WEIGHTED_PORTFOLIO_PROFILES = {
 }
 
 HAPPY_GOLD_COMBINED_PROFILE = "happy_gold_portfolio_100_100"
+ADAPTIVE_V3_COMBINED_PROFILE = "portfolio_v3_adaptive_union_shadow"
 
 
 def _portfolio_regime(request: DecisionRequest, settings: Settings) -> RegimeSnapshot:
@@ -1815,6 +2014,66 @@ def _evaluate_happy_gold_combined_portfolio(request: DecisionRequest, settings: 
     return selected
 
 
+def _evaluate_adaptive_v3_combined_portfolio(request: DecisionRequest, settings: Settings) -> DecisionResponse:
+    profile = ADAPTIVE_V3_COMBINED_PROFILE
+    combined_settings = copy(settings)
+    combined_settings.portfolio_daily_trade_cap = None
+    regime = _portfolio_regime(request, settings)
+    combined_settings.stochastic_regime_snapshot = regime
+    combined_settings.multitimeframe_regime_snapshot = regime
+    components = [
+        ("zigzag-v3", _evaluate_zigzag_scalper_v3(request.model_copy(update={"candles": request.candles[-1000:]}), combined_settings)),
+        ("multitimeframe-v3", _evaluate_multitimeframe_trend_pullback(
+            request.model_copy(update={"candles": request.candles[-1000:]}), combined_settings,
+            "multitimeframe_trend_pullback_v3_adaptive_shadow",
+        )),
+        ("stochastic-v3", _evaluate_stochastic_sell_v3(request, combined_settings, "stochastic_sell_v3_adaptive_shadow")),
+    ]
+    candidates = [(name, response) for name, response in components if response.metadata.get("candidate")]
+    if not candidates:
+        return DecisionResponse(
+            action=DecisionAction.HOLD,
+            reason="portfolio_v3_adaptive_components_not_confirmed",
+            risk_checks=[RiskCheck(name=name, passed=False, detail=response.reason) for name, response in components]
+            + [RiskCheck(name="experimental_shadow_lock", passed=True, detail="execution_permanently_disabled")],
+            metadata={
+                "strategy_profile": profile, "candidate": False,
+                "combined_v3_execution": "three_independent_parallel_tracks",
+                "combined_v3_component_reasons_json": json.dumps({name: response.reason for name, response in components}, sort_keys=True),
+                "experimental_shadow_lock": True,
+            },
+        )
+    parallel: list[DecisionResponse] = []
+    allocation_request = request.model_copy(update={"positions": []})
+    for component, candidate in candidates:
+        allocated = _apply_weighted_portfolio_allocation(
+            candidate, allocation_request, combined_settings, profile=profile, component=component, weight=1.0,
+        )
+        allocated.reason = "portfolio_v3_parallel_component_shadow_signal"
+        allocated.metadata.update({
+            "strategy_profile": profile, "combined_component": component,
+            "parallel_risk_pct": settings.risk_per_trade_pct,
+            "parallel_position_scope": component, "experimental_shadow_lock": True,
+        })
+        parallel.append(allocated)
+    return DecisionResponse(
+        action=DecisionAction.HOLD,
+        reason="portfolio_v3_parallel_candidates",
+        risk_checks=[RiskCheck(name="parallel_component_isolation", passed=True, detail="independent_positions_and_cooldowns")],
+        metadata={
+            "strategy_profile": profile, "candidate": False,
+            "combined_v3_candidates_json": json.dumps([name for name, _ in candidates]),
+            "combined_v3_execution": "three_independent_parallel_tracks",
+            "parallel_risk_pct_each": settings.risk_per_trade_pct,
+            "parallel_max_aggregate_risk_pct": settings.risk_per_trade_pct * 3,
+            "adaptive_regime": regime.name, "adaptive_regime_direction": regime.direction,
+            "experimental_shadow_lock": True,
+            "research_status": "combined_v3_requires_independent_walk_forward_validation",
+        },
+        parallel_candidates=parallel,
+    )
+
+
 def _adaptive_regime(request: DecisionRequest, settings: Settings) -> RegimeSnapshot:
     override = getattr(settings, "adaptive_regime_snapshot", None)
     if isinstance(override, RegimeSnapshot):
@@ -1934,7 +2193,11 @@ def evaluate_decision(request: DecisionRequest, settings: Settings, strategy_pro
     profile = strategy_profile or settings.strategy_profile
     if profile == "stochastic_sell_session":
         return _evaluate_stochastic_sell_session(request, settings, profile)
+    if profile == "stochastic_sell_v3_adaptive_shadow":
+        return _evaluate_stochastic_sell_v3(request, settings, profile)
     if profile == "multitimeframe_trend_pullback":
+        return _evaluate_multitimeframe_trend_pullback(request, settings, profile)
+    if profile == "multitimeframe_trend_pullback_v3_adaptive_shadow":
         return _evaluate_multitimeframe_trend_pullback(request, settings, profile)
     if profile == "happy_gold_zigzag_scalper":
         return _evaluate_happy_gold_zigzag_scalper(request, settings, profile)
@@ -1944,12 +2207,16 @@ def evaluate_decision(request: DecisionRequest, settings: Settings, strategy_pro
         return _evaluate_weighted_portfolio_6_7(request, settings, profile)
     if profile == HAPPY_GOLD_COMBINED_PROFILE:
         return _evaluate_happy_gold_combined_portfolio(request, settings)
+    if profile == ADAPTIVE_V3_COMBINED_PROFILE:
+        return _evaluate_adaptive_v3_combined_portfolio(request, settings)
     if profile == HAPPY_GOLD_TICK_IMPULSE_PROFILE:
         return _evaluate_happy_gold_tick_impulse(request, settings)
     if profile == HAPPY_GOLD_ZIGZAG_TICK_CONTEXT_PROFILE:
         return _evaluate_happy_gold_zigzag_tick_context(request, settings)
     if profile == HAPPY_GOLD_ZIGZAG_STRUCTURAL_TICK_PROFILE:
         return _evaluate_happy_gold_zigzag_structural_tick(request, settings)
+    if profile == ZIGZAG_SCALPER_V3_PROFILE:
+        return _evaluate_zigzag_scalper_v3(request, settings)
     if profile == HAPPY_GOLD_ZIGZAG_NORMALIZED_RANGE_PROFILE:
         return _evaluate_happy_gold_zigzag_structural_tick(
             request,

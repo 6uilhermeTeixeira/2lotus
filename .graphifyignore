@@ -1,0 +1,29 @@
+# Dependencies and generated build output
+node_modules/
+.venv/
+dist/
+build/
+coverage/
+__pycache__/
+*.pyc
+
+# Runtime state and large market datasets
+.runtime/
+logs/
+python-service/data/
+*.sqlite
+*.sqlite3
+*.db
+*.bi5
+*.parquet
+*.arrow
+
+# Credentials and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Generated Graphify artifacts
+graphify-out/

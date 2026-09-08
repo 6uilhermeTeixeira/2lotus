@@ -1,6 +1,7 @@
-# 2Lotus Live Core
+# Live Core
 
-Subprojeto operacional isolado para XAUUSD/M5 com quatro perfis:
+Núcleo operacional isolado para acompanhar estratégias promovidas pelo 2Lotus em XAUUSD/M5.
+O dashboard protegido é servido localmente em `http://127.0.0.1:1111`.
 
 - `core-zigzag`: Happy Gold ZigZag Scalper (shadow)
 - `core-stochastic`: Stochastic Sell 18 UTC (shadow)
@@ -31,14 +32,24 @@ latencia, slippage e especificacoes da corretora.
 ```bash
 cd python-service
 cp ../.env.example .env
-docker build -t 2lotus-live-core .
-docker run --rm --env-file .env -p 8000:8000 2lotus-live-core
+docker build -t live-core .
+docker run --rm --env-file .env -p 1111:1111 live-core
 ```
 
-Depois, adicione `http://127.0.0.1:8000` na allowlist de WebRequest do MT5, compile
+Depois, adicione `http://127.0.0.1:1111` na allowlist de WebRequest do MT5, compile
 `mt5/experts/LiveCoreBridgeEA.mq5` e mantenha `EnableOrderExecution=false` no primeiro ciclo.
 
 ## Promocao controlada
+
+Um bundle aprovado e versionado produzido no 2Lotus pode ser registrado com:
+
+```bash
+cd python-service
+.venv/bin/python ../scripts/import_strategy_bundle.py --bundle /caminho/core-portfolio-1.0.0.tar.gz
+```
+
+A importacao valida contrato, nomes e SHA-256, rejeita path traversal e sempre grava
+`active=false` e `live_canary_armed=false`. Ela nao habilita execucao real.
 
 1. Validar `/health` e quatro consultas sem ordens.
 2. Confirmar que `core-portfolio` registra candidatos e estado diario no Supabase isolado.

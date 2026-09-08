@@ -6,10 +6,11 @@ from pathlib import Path
 class Settings:
     def __init__(self) -> None:
         service_root = Path(__file__).resolve().parent.parent
-        self.app_name = getenv("DAYTRADE_APP_NAME", "2lotus-strategy-service")
+        self.lotus_data_root = Path(getenv("LOTUS_DATA_ROOT", "/home/codexops/lotus-data"))
+        self.app_name = getenv("DAYTRADE_APP_NAME", "live-core")
         self.host = getenv("DAYTRADE_HOST", "127.0.0.1")
-        self.port = int(getenv("DAYTRADE_PORT", "8000"))
-        self.strategy_profile = getenv("DAYTRADE_STRATEGY_PROFILE", "stochastic_sell_session")
+        self.port = int(getenv("DAYTRADE_PORT", "1111"))
+        self.strategy_profile = getenv("DAYTRADE_STRATEGY_PROFILE", "portfolio_v3_adaptive_union_shadow")
         self.default_symbol = getenv("DAYTRADE_DEFAULT_SYMBOL", "XAUUSD")
         self.default_timeframe = getenv("DAYTRADE_DEFAULT_TIMEFRAME", "M5")
         self.max_spread_points = float(getenv("DAYTRADE_MAX_SPREAD_POINTS", "50.0"))
@@ -18,7 +19,7 @@ class Settings:
         self.enable_live_decisions = getenv("DAYTRADE_ENABLE_LIVE_DECISIONS", "false").lower() == "true"
         self.live_canary_armed = getenv("LIVE_CANARY_ARMED", "false").lower() == "true"
         self.live_canary_account_login = int(getenv("LIVE_CANARY_ACCOUNT_LOGIN", "0"))
-        self.live_canary_bot_id = getenv("LIVE_CANARY_BOT_ID", "core-portfolio")
+        self.live_canary_bot_id = getenv("LIVE_CANARY_BOT_ID", "")
         self.live_canary_max_lot = float(getenv("LIVE_CANARY_MAX_LOT", "0.01"))
         self.live_canary_max_spread_points = float(getenv("LIVE_CANARY_MAX_SPREAD_POINTS", "15"))
         self.fimath_mode = getenv("DAYTRADE_FIMATH_MODE", "shadow").lower()
@@ -32,13 +33,13 @@ class Settings:
         self.fimath_min_closed_paper_trades = int(getenv("DAYTRADE_FIMATH_MIN_CLOSED_PAPER_TRADES", "30"))
         self.chart_cache_limit = int(getenv("DAYTRADE_CHART_CACHE_LIMIT", "5000"))
         self.backtest_balance = float(getenv("DAYTRADE_BACKTEST_BALANCE", "10000"))
-        self.backtest_spread_points = float(getenv("DAYTRADE_BACKTEST_SPREAD_POINTS", "30"))
+        self.backtest_spread_points = float(getenv("DAYTRADE_BACKTEST_SPREAD_POINTS", "0"))
         self.backtest_point_size = float(getenv("DAYTRADE_BACKTEST_POINT_SIZE", "0.01"))
         self.backtest_value_per_point_per_lot = float(getenv("DAYTRADE_BACKTEST_VALUE_PER_POINT_PER_LOT", "1"))
         self.backtest_candle_limit = int(getenv("DAYTRADE_BACKTEST_CANDLE_LIMIT", "100000"))
-        self.backtest_risk_per_trade_pct = float(getenv("DAYTRADE_BACKTEST_RISK_PER_TRADE_PCT", "0.25"))
+        self.backtest_risk_per_trade_pct = float(getenv("DAYTRADE_BACKTEST_RISK_PER_TRADE_PCT", "1"))
         self.backtest_slippage_points = float(getenv("DAYTRADE_BACKTEST_SLIPPAGE_POINTS", "2"))
-        self.backtest_commission_per_lot = float(getenv("DAYTRADE_BACKTEST_COMMISSION_PER_LOT", "0"))
+        self.backtest_commission_per_lot = float(getenv("DAYTRADE_BACKTEST_COMMISSION_PER_LOT", "4.50"))
         self.backtest_session_start_utc = getenv("DAYTRADE_BACKTEST_SESSION_START_UTC", "06:00")
         self.backtest_session_end_utc = getenv("DAYTRADE_BACKTEST_SESSION_END_UTC", "21:00")
         self.backtest_max_trades_per_day = int(getenv("DAYTRADE_BACKTEST_MAX_TRADES_PER_DAY", "4"))
@@ -75,6 +76,20 @@ class Settings:
         self.happy_gold_normalized_range_max_spread_points = float(
             getenv("DAYTRADE_HAPPY_GOLD_NORMALIZED_RANGE_MAX_SPREAD_POINTS", "15")
         )
+        self.zigzag_scalper_v3_expansion_threshold = float(
+            getenv("DAYTRADE_ZIGZAG_SCALPER_V3_EXPANSION_THRESHOLD", "6.0")
+        )
+        self.stochastic_sell_v2_threshold = float(getenv("DAYTRADE_STOCHASTIC_SELL_V2_THRESHOLD", "85"))
+        self.stochastic_sell_v2_target_rr = float(getenv("DAYTRADE_STOCHASTIC_SELL_V2_TARGET_RR", "1.25"))
+        self.stochastic_sell_v2_partial_pct = float(getenv("DAYTRADE_STOCHASTIC_SELL_V2_PARTIAL_PCT", "50"))
+        self.stochastic_sell_v2_cutoff_hour = int(getenv("DAYTRADE_STOCHASTIC_SELL_V2_CUTOFF_HOUR", "15"))
+        self.stochastic_sell_v3_cutoff_hour = int(getenv("DAYTRADE_STOCHASTIC_SELL_V3_CUTOFF_HOUR", "13"))
+        self.multitimeframe_v2_strength_min = float(getenv("DAYTRADE_MULTITIMEFRAME_V2_STRENGTH_MIN", "0.5"))
+        self.multitimeframe_v2_session_start_hour = int(getenv("DAYTRADE_MULTITIMEFRAME_V2_SESSION_START_HOUR", "13"))
+        self.multitimeframe_v2_session_end_hour = int(getenv("DAYTRADE_MULTITIMEFRAME_V2_SESSION_END_HOUR", "16"))
+        self.multitimeframe_v2_stop_atr = float(getenv("DAYTRADE_MULTITIMEFRAME_V2_STOP_ATR", "1.2"))
+        self.multitimeframe_v2_target_rr = float(getenv("DAYTRADE_MULTITIMEFRAME_V2_TARGET_RR", "1.25"))
+        self.multitimeframe_v2_max_holding_bars = int(getenv("DAYTRADE_MULTITIMEFRAME_V2_MAX_HOLDING_BARS", "6"))
         self.happy_gold_impulse_session_start_utc = getenv("DAYTRADE_HAPPY_GOLD_IMPULSE_SESSION_START_UTC", "00:00")
         self.happy_gold_impulse_session_end_utc = getenv("DAYTRADE_HAPPY_GOLD_IMPULSE_SESSION_END_UTC", "17:00")
         self.happy_gold_multiwindow_shadow_enabled = getenv("DAYTRADE_HAPPY_GOLD_MULTIWINDOW_SHADOW_ENABLED", "false").lower() == "true"
@@ -87,6 +102,9 @@ class Settings:
         self.session_max_age_seconds = int(getenv("DAYTRADE_SESSION_MAX_AGE_SECONDS", "43200"))
         self.results_store = getenv("DAYTRADE_RESULTS_STORE", "JSON").upper()
         self.sqlite_path = Path(getenv("DAYTRADE_SQLITE_PATH", str(service_root / "data" / "runtime.db")))
+        self.strategy_registry_path = Path(
+            getenv("LOTUS_STRATEGY_REGISTRY_PATH", str(service_root.parent / ".runtime" / "strategies"))
+        )
         self.supabase_url = getenv("DAYTRADE_SUPABASE_URL")
         self.supabase_service_role_key = getenv("DAYTRADE_SUPABASE_SERVICE_ROLE_KEY")
         self.ingest_api_key = getenv("DAYTRADE_INGEST_API_KEY")

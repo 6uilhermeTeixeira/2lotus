@@ -143,6 +143,7 @@ class DecisionResponse(BaseModel):
     move_stop_to_breakeven: bool = False
     risk_checks: list[RiskCheck] = Field(default_factory=list)
     metadata: dict[str, str | int | float | bool] = Field(default_factory=dict)
+    parallel_candidates: list["DecisionResponse"] = Field(default_factory=list)
 
 
 class HealthResponse(BaseModel):
@@ -298,6 +299,25 @@ class EquityComparisonResponse(BaseModel):
     timeframe: str
     period_days: int
     updated_at_utc: datetime
+    series: list[EquitySeries] = Field(default_factory=list)
+    missing_bot_ids: list[str] = Field(default_factory=list)
+
+
+class MarketCandlePoint(BaseModel):
+    t: int
+    o: float
+    h: float
+    l: float  # noqa: E741 - compact OHLC wire format used by the chart
+    c: float
+    volume: float
+
+
+class BacktestMarketChartResponse(BaseModel):
+    symbol: str
+    resolution: str
+    period_days: int
+    dataset_version: str
+    candles: list[MarketCandlePoint] = Field(default_factory=list)
     series: list[EquitySeries] = Field(default_factory=list)
     missing_bot_ids: list[str] = Field(default_factory=list)
 

@@ -15,4 +15,4 @@ COPY scripts ./scripts
 RUN useradd --create-home --uid 10001 lotus && chown -R lotus:lotus /app
 USER lotus
 
-CMD ["/app/.venv/bin/python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["/app/.venv/bin/python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "1111"]

@@ -15,7 +15,10 @@ from .backtest import replay_settings_fingerprint
 from .config import get_settings
 from .growth import simulate_growth, simulate_tiered_growth
 from .live_guard import apply_live_canary_guard
-from .pages import render_catalog_page, render_comparison_page, render_growth_simulator_page, render_login_page, render_operations_page, render_results_page
+from .local_dataset import DatasetError, DatasetRelease
+from .market_history import SUPPORTED_RESOLUTIONS, load_chart_candles
+from .promotion_registry import list_promotions
+from .pages import render_catalog_page, render_comparison_page, render_growth_simulator_page, render_live_overview_page, render_login_page, render_operations_page, render_results_page, render_security_page, render_trades_page
 from .results_store import (
     load_bots_catalog,
     load_results_snapshot,
@@ -23,7 +26,7 @@ from .results_store import (
     resolve_bot_results_file,
 )
 from .security import RateLimit, client_key, rate_limiter, require_same_origin
-from .schemas import BotCatalogItem, CandleIngestRequest, CandleSnapshot, DecisionAction, DecisionRequest, DecisionResponse, EquityComparisonResponse, EquityPoint, EquitySeries, GrowthSimulationRequest, GrowthSimulationResponse, HealthResponse, HistoricalReplayResponse, MarketChartResponse, OperationsResponse, ResultsResponse, ResultsSummary, RuntimeStatusItem, TickIngestRequest, TradeIngestRequest
+from .schemas import BacktestMarketChartResponse, BotCatalogItem, CandleIngestRequest, CandleSnapshot, DecisionAction, DecisionRequest, DecisionResponse, EquityComparisonResponse, EquityPoint, EquitySeries, GrowthSimulationRequest, GrowthSimulationResponse, HealthResponse, HistoricalReplayResponse, MarketChartResponse, OperationsResponse, ResultsResponse, ResultsSummary, RuntimeStatusItem, TickIngestRequest, TradeIngestRequest
 from .sqlite_store import SQLiteStore
 from .strategy import HAPPY_GOLD_COMBINED_PROFILE, WEIGHTED_PORTFOLIO_PROFILES, evaluate_decision
 from .supabase_store import SupabaseRequestError, SupabaseStore
@@ -36,7 +39,7 @@ settings = get_settings()
 app = FastAPI(title=settings.app_name)
 app.mount("/static", StaticFiles(directory=Path(__file__).resolve().parent / "static"), name="static")
 BRAND_ICON_PATH = Path(__file__).resolve().parent / "static" / "brand" / "icon-1-black.png"
-CORE_BOT_IDS = {"core-zigzag", "core-stochastic", "core-multitimeframe", "core-portfolio"}
+CORE_BOT_IDS = {"core-zigzag-v3", "core-stochastic-v3", "core-multitimeframe-v3", "core-combined-v3"}
 
 
 @app.middleware("http")
@@ -183,13 +186,13 @@ def _validate_ingested_candles(candles: list[CandleSnapshot]) -> None:
 
 @app.get("/", include_in_schema=False)
 def root(request: Request) -> RedirectResponse:
-    return RedirectResponse(url="/bots" if has_valid_session(request, settings) else "/login", status_code=303)
+    return RedirectResponse(url="/overview" if has_valid_session(request, settings) else "/login", status_code=303)
 
 
 @app.get("/login", response_class=HTMLResponse, response_model=None, include_in_schema=False)
 def login_page(request: Request, error: str | None = None) -> HTMLResponse | RedirectResponse:
     if has_valid_session(request, settings):
-        return RedirectResponse(url="/bots", status_code=303)
+        return RedirectResponse(url="/overview", status_code=303)
     if error == "config" or not settings.dashboard_auth_configured:
         return render_login_page("O acesso ainda nao foi configurado neste ambiente.", status_code=503)
     return render_login_page()
@@ -204,7 +207,7 @@ async def login(request: Request) -> RedirectResponse | HTMLResponse:
     if not password_matches(await read_login_password(request), settings):
         return render_login_page("Senha invalida.", status_code=401)
     rate_limiter.reset(rate_key)
-    response = RedirectResponse(url="/bots", status_code=303)
+    response = RedirectResponse(url="/overview", status_code=303)
     response.set_cookie(
         SESSION_COOKIE_NAME,
         create_session_value(settings),
@@ -229,6 +232,27 @@ def bots_page(request: Request) -> HTMLResponse | RedirectResponse:
     if redirect := _require_page_session(request):
         return redirect
     return render_catalog_page(_list_bots(True))
+
+
+@app.get("/overview", response_class=HTMLResponse, response_model=None, include_in_schema=False)
+def overview_page(request: Request) -> HTMLResponse | RedirectResponse:
+    if redirect := _require_page_session(request):
+        return redirect
+    return render_live_overview_page(len(_list_bots(True)))
+
+
+@app.get("/trades", response_class=HTMLResponse, response_model=None, include_in_schema=False)
+def trades_page(request: Request) -> HTMLResponse | RedirectResponse:
+    if redirect := _require_page_session(request):
+        return redirect
+    return render_trades_page()
+
+
+@app.get("/security", response_class=HTMLResponse, response_model=None, include_in_schema=False)
+def security_page(request: Request) -> HTMLResponse | RedirectResponse:
+    if redirect := _require_page_session(request):
+        return redirect
+    return render_security_page()
 
 
 @app.get("/compare", response_class=HTMLResponse, response_model=None, include_in_schema=False)
@@ -382,6 +406,32 @@ def read_equity_comparison(request: Request, symbol: str = "XAUUSD", days: int =
     )
 
 
+@app.get("/api/backtest-market-chart", response_model=BacktestMarketChartResponse)
+def read_backtest_market_chart(
+    request: Request, symbol: str = "XAUUSD", resolution: str = "5m", days: int = 30
+) -> BacktestMarketChartResponse:
+    _require_api_session(request)
+    if resolution not in SUPPORTED_RESOLUTIONS:
+        raise HTTPException(status_code=422, detail="resolution must be one of 1m, 5m, 1h, 1d")
+    if days < 1 or days > 365:
+        raise HTTPException(status_code=422, detail="chart days must be between 1 and 365")
+    try:
+        release = DatasetRelease.open(settings.lotus_data_root, "CURRENT")
+        candles = load_chart_candles(release, symbol.upper(), resolution, days)
+    except DatasetError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    equity = read_equity_comparison(request, symbol, 365)
+    return BacktestMarketChartResponse(
+        symbol=symbol.upper(),
+        resolution=resolution,
+        period_days=days,
+        dataset_version=release.version,
+        candles=candles,
+        series=equity.series,
+        missing_bot_ids=equity.missing_bot_ids,
+    )
+
+
 @app.get("/api/growth-simulation", response_model=GrowthSimulationResponse)
 def read_growth_simulation(
     request: Request,
@@ -395,7 +445,7 @@ def read_growth_simulation(
         raise HTTPException(status_code=422, detail="risk per trade must be between 0.01 and 10")
     if not _uses_supabase_results():
         raise HTTPException(status_code=503, detail="growth simulation requires DAYTRADE_RESULTS_STORE=SUPABASE")
-    bot = _find_bot("core-portfolio", include_archived=True)
+    bot = _find_bot("core-combined-v3", include_archived=True)
     replay = SupabaseStore(settings).load_backtest_snapshot(bot.id, 365)
     if replay is None or not _replay_cache_matches_settings(replay, bot):
         raise HTTPException(status_code=503, detail="the annual 0.25 percent replay must be recalculated first")
@@ -419,7 +469,7 @@ def create_growth_simulation(payload: GrowthSimulationRequest, request: Request)
         raise HTTPException(status_code=422, detail="the first tier must start at or below the initial balance")
     if any(tiers[index].risk_per_trade_pct > tiers[index - 1].risk_per_trade_pct for index in range(1, len(tiers))):
         raise HTTPException(status_code=422, detail="risk must stay equal or decrease at higher balance tiers")
-    bot = _find_bot("core-portfolio")
+    bot = _find_bot("core-combined-v3")
     replay = SupabaseStore(settings).load_backtest_snapshot(bot.id, 365)
     if replay is None or not _replay_cache_matches_settings(replay, bot):
         raise HTTPException(status_code=503, detail="the annual replay cache is unavailable or stale")
@@ -569,6 +619,17 @@ def ingest_ticks(payload: TickIngestRequest, request: Request, x_2lotus_ingest_k
         raise HTTPException(status_code=503, detail="tick ingestion requires a persistent results store")
 
 
+@app.get("/api/promoted-strategies")
+def read_promoted_strategies(request: Request) -> dict[str, object]:
+    _require_api_session(request)
+    promotions = list_promotions(settings.strategy_registry_path)
+    return {
+        "items": promotions,
+        "count": len(promotions),
+        "live_canary_armed": settings.live_canary_armed,
+    }
+
+
 @app.get("/health", response_model=HealthResponse)
 def healthcheck() -> HealthResponse:
     return HealthResponse(status="ok", service=settings.app_name, timestamp_utc=datetime.now(timezone.utc))
@@ -638,6 +699,11 @@ def read_config(request: Request) -> dict[str, str | int | float | bool]:
         "happy_gold_combined_session_start_utc": settings.happy_gold_combined_session_start_utc,
         "happy_gold_combined_session_end_utc": settings.happy_gold_combined_session_end_utc,
         "enable_live_decisions": settings.enable_live_decisions,
+        "live_canary_armed": settings.live_canary_armed,
+        "live_canary_account_login": settings.live_canary_account_login,
+        "live_canary_bot_id": settings.live_canary_bot_id,
+        "live_canary_max_lot": settings.live_canary_max_lot,
+        "live_canary_max_spread_points": settings.live_canary_max_spread_points,
         "dashboard_auth_configured": settings.dashboard_auth_configured,
         "results_store": settings.results_store,
         "supabase_results_configured": settings.supabase_results_configured,
