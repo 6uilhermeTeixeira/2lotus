@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+session_dir="${XDG_CONFIG_HOME:-$HOME/.config}/live-core-mt5-session"
+auth_file="$session_dir/Xauthority"
+mkdir -p "$session_dir"
+chmod 700 "$session_dir"
+
+if [[ ! -s "$auth_file" ]]; then
+    cookie="$(openssl rand -hex 16)"
+    touch "$auth_file"
+    chmod 600 "$auth_file"
+    xauth -f "$auth_file" add :6 MIT-MAGIC-COOKIE-1 "$cookie"
+fi
+
+exec /usr/bin/Xvfb :6 -screen 0 1440x900x24 -nolisten tcp -auth "$auth_file"

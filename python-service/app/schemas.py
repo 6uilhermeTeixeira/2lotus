@@ -25,7 +25,14 @@ class AccountSnapshot(BaseModel):
     balance: float
     equity: float
     margin_free: float
+    broker: str = Field(default="", max_length=120)
+    server: str = Field(default="", max_length=120)
+    currency: str = Field(default="USD", min_length=1, max_length=12)
+    floating_profit: float | None = None
+    realized_profit_today: float | None = None
+    profit_day: date | None = None
     leverage: int | None = None
+    trade_mode: str = Field(default="unknown", pattern="^(demo|contest|real|unknown)$")
 
 
 class CandleSnapshot(BaseModel):
@@ -89,6 +96,12 @@ class FlowSnapshot(BaseModel):
     neutral_ticks: int = 0
     up_volume: float = 0.0
     down_volume: float = 0.0
+
+
+class LiveSecuritySettingsUpdate(BaseModel):
+    enable_live_decisions: bool
+    live_canary_armed: bool
+    password: str | None = Field(default=None, max_length=512)
 
 
 class DecisionRequest(BaseModel):
@@ -389,3 +402,15 @@ class RuntimeStatusItem(BaseModel):
 class OperationsResponse(BaseModel):
     updated_at_utc: datetime
     bots: list[RuntimeStatusItem] = Field(default_factory=list)
+
+
+class AccountDashboardResponse(BaseModel):
+    available: bool
+    status: str = Field(pattern="^(online|delayed|offline|waiting)$")
+    initial_balance: float
+    expected_account_id: str = ""
+    expected_server: str = ""
+    identity_matches: bool | None = None
+    account: AccountSnapshot | None = None
+    observed_at_utc: datetime | None = None
+    age_seconds: float | None = None

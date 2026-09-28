@@ -1,69 +1,72 @@
-# Estrategias Live Core
+# Estratégias do Live Core
 
-O Live Core acompanha quatro perfis em `XAUUSD` com entrada operacional em `M5`. Os horarios abaixo
-sao UTC. Todos os indicadores usam apenas candles concluídos; os componentes isolados permanecem
-em shadow e somente o portfólio coordenador pode ser promovido pelo guardiao do canario.
+O catálogo operacional atual acompanha somente dois perfis ZigZag em `XAUUSD/M5`. Os horários são
+UTC e os indicadores usam dados causais. Ambos permanecem permanentemente em shadow.
 
-## Happy Gold ZigZag Scalper
+## ZigZag Scalper V4.0
 
-Perfil: `happy_gold_zigzag_scalper`
+- ID: `core-zigzag-v10`
+- Perfil: `zigzag_scalper_v10_context_router_shadow`
 
-- Agrega candles M5 em M30 e requer pelo menos sete candles M30 completos.
-- Usa um proxy causal de ZigZag: um pivô precisa de duas velas confirmadas de cada lado.
-- Compra quando o ask rompe o último pivô superior e vende quando o bid rompe o pivô inferior.
-- Filtra a sessão para `03:00-19:00 UTC` e impede outra posição no mesmo símbolo.
-- Stop fixo: 240 pontos. Alvo: 1000 pontos. Janela máxima: dois candles M5.
-- A reconstrução também registra break-even em 40 pontos e trailing após 120 pontos, com distância
-  de 60 pontos, para pesquisa e replay compatíveis.
-- O lote original reconstruído de `0.10` aparece apenas como sugestão do componente. O canário real
-  aplica o limite independente de `0.01`.
+- Agrega candles M5 completos em M30 e usa pivôs com duas velas de confirmação de cada lado.
+- Opera rompimentos causais entre `03:00-19:00 UTC`.
+- Em volatilidade normal usa a lógica/geometria V1; em expansão do range M5 usa filtros estruturais V2.
+- O corte adaptativo padrão é range médio M5 igual ou superior a `6,0`.
+- Roteia compras para V3.2 e vendas para V3.1, sem avaliar o ramo alternativo.
+- Permanece em shadow.
 
-## Stochastic Sell 18 UTC
+## ZigZag Scalper V5.1
 
-Perfil: `stochastic_sell_session`
+- ID: `core-zigzag-v8`
+- Perfil: `zigzag_scalper_v8_accuracy_cycle_shadow`
 
-- Calcula Estocástico `14/3/3`, EMA50 e ATR14 sobre M5, exigindo ao menos 60 candles.
-- O setup-base baixista exige preço abaixo da EMA50 e cruzamento de `%K` abaixo de `%D` depois de
-  a leitura anterior alcançar 65 ou mais.
-- A variante selecionada aceita apenas `sell` e entradas estritamente anteriores a `18:00 UTC`.
-- Stop acima da máxima das três velas mais recentes mais `0,25 ATR`.
-- Parcial teórica em 1R e alvo final em 2R.
-- O perfil isolado possui trava shadow permanente; no portfólio ainda depende de regime vendedor.
+- Aplica o calendário seletivo de semanas e dias em UTC ao ramo ZigZag contextual.
+- Mantém sinais e risco herdados do roteador temporal V6.0.
+- Permanece em shadow e requer replay unificado e validação forward.
 
-## Tendencia Multitemporal
+## Stochastic Sell V3
 
-Perfil: `multitimeframe_trend_pullback`
+- ID: `core-stochastic-v3`
+- Perfil: `stochastic_sell_v3_adaptive_shadow`
 
-- Opera somente compras na janela `13:00-16:00 UTC`.
-- H1: EMA20 acima da EMA50, EMA20 ascendente e distância entre médias de pelo menos `0,7 ATR`.
-- M15: EMA9 acima da EMA21 e EMA9 ascendente.
-- M5: EMA9 acima da EMA21, mínima tocando a EMA9 e candle comprador fechando acima dela.
-- Stop de `1,2 ATR` do M5, alvo de `0,75R` e duração máxima de 12 candles M5.
-- Aplica multiplicador de risco `0,5` e permanece em shadow isoladamente.
+- Usa Estocástico `14/3/3`, EMA50 e ATR14 em candles M5 concluídos.
+- Exige cruzamento baixista a partir da região extrema e aceita somente vendas antes de `13:00 UTC`.
+- Usa a geometria seletiva V2 e veta o contexto H1 vendedor fraco identificado na pesquisa.
+- Stop acima das três velas recentes mais `0,25 ATR`; parcial em 1R e alvo segundo a variante ativa.
+- Permanece em shadow quando consultado isoladamente.
 
-## Happy Gold + Portfolio 7/6 - 100/100
+## Tendência Multitemporal V3
 
-Perfil: `happy_gold_portfolio_100_100`
+- ID: `core-multitimeframe-v3`
+- Perfil: `multitimeframe_trend_pullback_v3_adaptive_shadow`
 
-- Coordena o ZigZag com o portfólio formado por Tendência Multitemporal e Stochastic Sell.
-- O ZigZag confirmado tem prioridade. Dentro do portfólio 7/6, Tendência Multitemporal precede
-  Stochastic Sell.
-- Se ZigZag e portfólio produzirem lados opostos simultaneamente, o coordenador bloqueia a entrada.
-- O sinal Stochastic só é aceito quando o classificador identifica regime `trend/sell`.
-- A janela do coordenador é `06:00-19:00 UTC`, com uma posição compartilhada por símbolo.
-- É o único `bot_id` permitido pelo guardião real: `core-portfolio`.
-- A promoção final ainda exige todas as travas descritas em `docs/safety-controls.md`.
+- Opera compras entre `13:00-16:00 UTC` com alinhamento causal H1/M15/M5.
+- Em range/transição H1 usa a V2 (`0,5 ATR`, alvo `1,25R`, seis candles).
+- Em tendência compradora/alta volatilidade não contrária usa a V1 (`0,7 ATR`, alvo `0,75R`, doze candles).
+- Tendência H1 vendedora e histórico insuficiente são bloqueados.
+- Permanece em shadow quando consultado isoladamente.
 
-## Limites da reproducao
+## Combinação das três V3
 
-Estas regras são uma reconstrução baseada no histórico observado, não o código do fornecedor. O
-comportamento real de operações com duração de segundos depende de ticks, spread, slippage,
-latência, stops mínimos e especificações do contrato da corretora. Resultados históricos e shadow
-não garantem desempenho futuro.
+- ID: `core-combined-v3`
+- Perfil: `portfolio_v3_adaptive_union_shadow`
+
+- Avalia ZigZag, Stochastic e Multitemporal V3 no mesmo ciclo e pode devolver candidatos paralelos.
+- O EA consulta as três linhas individualmente sem execução e entrega somente a resposta do combinado
+  à rotina que pode executar.
+- É o único perfil elegível ao guardião real; por padrão a allowlist está vazia e nada é promovido.
+- A promoção exige todas as travas descritas em `safety-controls.md`.
+
+## Limites da reprodução
+
+As estratégias são reconstruções baseadas em evidência observada, não o código do fornecedor.
+Operações curtas dependem de ticks, spread, latência, slippage e contrato da corretora. Backtest,
+holdout e forward shadow não garantem desempenho real.
 
 ## Onde acompanhar
 
-- `/bots`: visão consolidada e curva comparativa.
-- `/compare`: métricas lado a lado dos quatro perfis.
-- `/bots/{bot_id}`: replay, candles, operações e validação de cada estratégia.
-- `/operations`: heartbeat, latência, candle mais recente e erros operacionais.
+- `/overview`: estado executivo do núcleo.
+- `/bots` e `/compare`: catálogo, curvas e comparação.
+- `/trades`: resultados reportados.
+- `/security`: postura das travas.
+- `/operations`: heartbeat, latência, dados recentes e erros.

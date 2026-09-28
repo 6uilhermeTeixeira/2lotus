@@ -12,13 +12,15 @@ from fastapi.staticfiles import StaticFiles
 
 from .auth import SESSION_COOKIE_NAME, create_session_value, has_valid_session, password_matches, read_login_password
 from .backtest import replay_settings_fingerprint
+from .canary_control import append_security_audit, canary_prerequisites
 from .config import get_settings
 from .growth import simulate_growth, simulate_tiered_growth
+from .harness import run_canary_disarmed_fail_closed_test, run_live_decisions_fail_closed_test
 from .live_guard import apply_live_canary_guard
 from .local_dataset import DatasetError, DatasetRelease
 from .market_history import SUPPORTED_RESOLUTIONS, load_chart_candles
 from .promotion_registry import list_promotions
-from .pages import render_catalog_page, render_comparison_page, render_growth_simulator_page, render_live_overview_page, render_login_page, render_operations_page, render_results_page, render_security_page, render_trades_page
+from .pages import render_account_page, render_catalog_page, render_comparison_page, render_growth_simulator_page, render_live_overview_page, render_login_page, render_operations_page, render_results_page, render_security_page, render_server_page, render_trades_page
 from .results_store import (
     load_bots_catalog,
     load_results_snapshot,
@@ -26,7 +28,7 @@ from .results_store import (
     resolve_bot_results_file,
 )
 from .security import RateLimit, client_key, rate_limiter, require_same_origin
-from .schemas import BacktestMarketChartResponse, BotCatalogItem, CandleIngestRequest, CandleSnapshot, DecisionAction, DecisionRequest, DecisionResponse, EquityComparisonResponse, EquityPoint, EquitySeries, GrowthSimulationRequest, GrowthSimulationResponse, HealthResponse, HistoricalReplayResponse, MarketChartResponse, OperationsResponse, ResultsResponse, ResultsSummary, RuntimeStatusItem, TickIngestRequest, TradeIngestRequest
+from .schemas import AccountDashboardResponse, AccountSnapshot, BacktestMarketChartResponse, BotCatalogItem, CandleIngestRequest, CandleSnapshot, DecisionAction, DecisionRequest, DecisionResponse, EquityComparisonResponse, EquityPoint, EquitySeries, GrowthSimulationRequest, GrowthSimulationResponse, HealthResponse, HistoricalReplayResponse, LiveSecuritySettingsUpdate, MarketChartResponse, OperationsResponse, ResultsResponse, ResultsSummary, RuntimeStatusItem, TickIngestRequest, TradeIngestRequest
 from .sqlite_store import SQLiteStore
 from .strategy import HAPPY_GOLD_COMBINED_PROFILE, WEIGHTED_PORTFOLIO_PROFILES, evaluate_decision
 from .supabase_store import SupabaseRequestError, SupabaseStore
@@ -39,7 +41,9 @@ settings = get_settings()
 app = FastAPI(title=settings.app_name)
 app.mount("/static", StaticFiles(directory=Path(__file__).resolve().parent / "static"), name="static")
 BRAND_ICON_PATH = Path(__file__).resolve().parent / "static" / "brand" / "icon-1-black.png"
-CORE_BOT_IDS = {"core-zigzag-v3", "core-stochastic-v3", "core-multitimeframe-v3", "core-combined-v3"}
+CORE_BOT_IDS = {"core-zigzag-v10", "core-zigzag-v8"}
+latest_live_account: tuple[AccountSnapshot, datetime] | None = None
+first_live_balance: float | None = None
 
 
 @app.middleware("http")
@@ -92,6 +96,18 @@ def _uses_supabase_results() -> bool:
 
 def _uses_sqlite_results() -> bool:
     return settings.results_store == "SQLITE"
+
+
+def _canary_readiness_checks() -> dict[str, bool]:
+    checks = canary_prerequisites(settings)
+    checks["supabase_connectivity"] = False
+    if checks["supabase_store"] and checks["supabase_credentials"]:
+        try:
+            SupabaseStore(settings).readiness()
+            checks["supabase_connectivity"] = True
+        except (RuntimeError, SupabaseRequestError):
+            pass
+    return checks
 
 
 def _list_bots(active: bool | None = True) -> list[BotCatalogItem]:
@@ -241,6 +257,15 @@ def overview_page(request: Request) -> HTMLResponse | RedirectResponse:
     return render_live_overview_page(len(_list_bots(True)))
 
 
+@app.get("/account", response_class=HTMLResponse, response_model=None, include_in_schema=False)
+def account_page(request: Request) -> HTMLResponse | RedirectResponse:
+    if redirect := _require_page_session(request):
+        return redirect
+    return render_account_page(
+        _list_bots(True), str(settings.live_canary_account_login or ""), settings.mt5_server
+    )
+
+
 @app.get("/trades", response_class=HTMLResponse, response_model=None, include_in_schema=False)
 def trades_page(request: Request) -> HTMLResponse | RedirectResponse:
     if redirect := _require_page_session(request):
@@ -253,6 +278,13 @@ def security_page(request: Request) -> HTMLResponse | RedirectResponse:
     if redirect := _require_page_session(request):
         return redirect
     return render_security_page()
+
+
+@app.get("/server", response_class=HTMLResponse, response_model=None, include_in_schema=False)
+def server_page(request: Request) -> HTMLResponse | RedirectResponse:
+    if redirect := _require_page_session(request):
+        return redirect
+    return render_server_page()
 
 
 @app.get("/compare", response_class=HTMLResponse, response_model=None, include_in_schema=False)
@@ -318,6 +350,40 @@ def read_comparison(request: Request) -> dict[str, object]:
             }
         )
     return {"updated_at_utc": datetime.now(timezone.utc), "bots": snapshots}
+
+
+@app.get("/api/account", response_model=AccountDashboardResponse)
+def read_account(request: Request) -> AccountDashboardResponse:
+    _require_api_session(request)
+    expected_id = str(settings.live_canary_account_login or "")
+    expected_server = settings.mt5_server
+    if latest_live_account is None:
+        return AccountDashboardResponse(
+            available=False,
+            status="waiting",
+            initial_balance=settings.mt5_initial_balance,
+            expected_account_id=expected_id,
+            expected_server=expected_server,
+        )
+    account, observed_at = latest_live_account
+    now = datetime.now(timezone.utc)
+    age_seconds = max(0.0, (now - observed_at).total_seconds())
+    status = "online" if age_seconds <= 30 else "delayed" if age_seconds <= 120 else "offline"
+    initial_balance = settings.mt5_initial_balance or first_live_balance or account.balance
+    identity_matches = expected_id == str(account.login or "") if expected_id and account.login else None
+    if account.login is None and expected_id:
+        account = account.model_copy(update={"login": int(expected_id)})
+    return AccountDashboardResponse(
+        available=True,
+        status=status,
+        initial_balance=initial_balance,
+        expected_account_id=expected_id,
+        expected_server=expected_server,
+        identity_matches=identity_matches,
+        account=account,
+        observed_at_utc=observed_at,
+        age_seconds=round(age_seconds, 1),
+    )
 
 
 @app.get("/api/equity-comparison", response_model=EquityComparisonResponse)
@@ -661,6 +727,18 @@ def read_metrics(request: Request) -> dict[str, object]:
     return metrics_snapshot()
 
 
+@app.post("/api/harness/tests/live-decisions-fail-closed")
+def run_live_decisions_fail_closed_harness(request: Request) -> dict[str, object]:
+    _require_api_session(request)
+    return run_live_decisions_fail_closed_test(settings)
+
+
+@app.post("/api/harness/tests/canary-disarmed-fail-closed")
+def run_canary_disarmed_fail_closed_harness(request: Request) -> dict[str, object]:
+    _require_api_session(request)
+    return run_canary_disarmed_fail_closed_test(settings)
+
+
 @app.get("/config")
 def read_config(request: Request) -> dict[str, str | int | float | bool]:
     _require_api_session(request)
@@ -668,6 +746,13 @@ def read_config(request: Request) -> dict[str, str | int | float | bool]:
         "app_name": settings.app_name,
         "host": settings.host,
         "port": settings.port,
+        "execution_server_provider": settings.execution_server_provider,
+        "execution_server_host": settings.execution_server_host,
+        "execution_server_region": settings.execution_server_region,
+        "execution_server_ssh_user": settings.execution_server_ssh_user,
+        "execution_server_ssh_port": settings.execution_server_ssh_port,
+        "execution_server_api_url": settings.execution_server_api_url,
+        "execution_results_target": settings.execution_results_target,
         "strategy_profile": settings.strategy_profile,
         "default_symbol": settings.default_symbol,
         "default_timeframe": settings.default_timeframe,
@@ -710,14 +795,74 @@ def read_config(request: Request) -> dict[str, str | int | float | bool]:
     }
 
 
+@app.get("/api/canary-readiness")
+def read_canary_readiness(request: Request) -> dict[str, object]:
+    _require_api_session(request)
+    checks = _canary_readiness_checks()
+    return {
+        "status": "ready" if all(checks.values()) else "blocked",
+        "ready": all(checks.values()),
+        "checks": checks,
+    }
+
+
+@app.put("/api/security-settings")
+def update_security_settings(payload: LiveSecuritySettingsUpdate, request: Request) -> dict[str, bool]:
+    _require_api_session(request)
+    requested = {
+        "enable_live_decisions": payload.enable_live_decisions,
+        "live_canary_armed": payload.live_canary_armed,
+    }
+    changed = [name for name, value in requested.items() if value != getattr(settings, name)]
+    if len(changed) != 1:
+        raise HTTPException(status_code=422, detail="change exactly one live security setting at a time")
+    setting_name = changed[0]
+    previous = getattr(settings, setting_name)
+    current = requested[setting_name]
+    if current:
+        if not payload.password or not password_matches(payload.password, settings):
+            raise HTTPException(status_code=403, detail="password confirmation is required to enable a live security setting")
+        failed = [name for name, passed in _canary_readiness_checks().items() if not passed]
+        if failed:
+            raise HTTPException(status_code=409, detail={"message": "live canary prerequisites are not ready", "failed_checks": failed})
+    setattr(settings, setting_name, current)
+    actor = request.client.host if request.client else "unknown"
+    append_security_audit(
+        settings.security_audit_path,
+        actor=actor,
+        setting=setting_name,
+        previous=previous,
+        current=current,
+    )
+    logger.warning(
+        "Live security setting changed for this process by %s: %s=%s",
+        actor,
+        setting_name,
+        current,
+    )
+    logger.info(
+        "Live security state: enable_live_decisions=%s live_canary_armed=%s",
+        settings.enable_live_decisions,
+        settings.live_canary_armed,
+    )
+    return {
+        "enable_live_decisions": settings.enable_live_decisions,
+        "live_canary_armed": settings.live_canary_armed,
+    }
+
+
 @app.post("/decision", response_model=DecisionResponse)
 def decision(payload: DecisionRequest, request: Request, x_2lotus_ingest_key: str | None = Header(default=None)) -> DecisionResponse:
+    global latest_live_account, first_live_balance
     run_id = payload.request_id
     started_at = monotonic()
     run_timer = StepTimer(run_id, "decision_run")
     rate_limiter.check(client_key(request, "ingest"), RateLimit(settings.ingest_rate_limit_per_minute, 60))
     _require_ingest_key(x_2lotus_ingest_key)
     _validate_ingested_candles(payload.candles)
+    latest_live_account = (payload.account.model_copy(), payload.timestamp_utc)
+    if first_live_balance is None:
+        first_live_balance = payload.account.balance
     store: SupabaseStore | None = None
     strategy_profile = settings.strategy_profile
     try:

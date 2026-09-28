@@ -1,12 +1,16 @@
-# Live Core
+# 2Lotus Live Core
+
+Operação simultânea demo/real: consulte [docs/two-account-runtime.md](docs/two-account-runtime.md).
 
 Núcleo operacional isolado para acompanhar estratégias promovidas pelo 2Lotus em XAUUSD/M5.
 O dashboard protegido é servido localmente em `http://127.0.0.1:1111`.
 
-- `core-zigzag`: Happy Gold ZigZag Scalper (shadow)
-- `core-stochastic`: Stochastic Sell 18 UTC (shadow)
-- `core-multitimeframe`: Tendencia Multitemporal (shadow)
-- `core-portfolio`: Happy Gold + Portfolio 7/6 - 100/100 (unico elegivel ao canario)
+O código está preparado, mas o serviço dedicado `live-core` está atualmente ocioso. O Live Core em
+uso ainda roda no serviço `2lotus`, junto da conta demo já registrada. O estado-alvo é mover o Live
+Core para seu serviço dedicado e reservar o serviço `2lotus` exclusivamente à conta demo.
+
+- `core-zigzag-v10`: ZigZag Scalper V4.0 — roteador de contexto (shadow)
+- `core-zigzag-v8`: ZigZag Scalper V5.1 — filtro temporal (shadow)
 
 ## Estado de seguranca
 
@@ -18,8 +22,10 @@ lote maximo de `0.01`. O limite diario de entradas do EA fica desativado por pad
 
 A matriz completa de protecoes, incluindo camada responsavel, valor inicial e comportamento de
 bloqueio, esta em [`docs/safety-controls.md`](docs/safety-controls.md).
-As regras, prioridades e limitacoes das quatro estrategias estao em
+As regras, prioridades e limitações das duas estratégias estão em
 [`docs/strategies.md`](docs/strategies.md).
+O retrato técnico validado do sistema e o backlog priorizado estão em
+[`docs/current-state.md`](docs/current-state.md) e [`docs/PRD-improvements.md`](docs/PRD-improvements.md).
 O armazenamento SQLite local, inicializacao, limites e backup estao em
 [`docs/local-database.md`](docs/local-database.md).
 
@@ -51,8 +57,8 @@ cd python-service
 A importacao valida contrato, nomes e SHA-256, rejeita path traversal e sempre grava
 `active=false` e `live_canary_armed=false`. Ela nao habilita execucao real.
 
-1. Validar `/health` e quatro consultas sem ordens.
-2. Confirmar que `core-portfolio` registra candidatos e estado diario no Supabase isolado.
+1. Validar `/health` e duas consultas sem ordens.
+2. Confirmar que os dois IDs ZigZag registram candidatos e estado diário no Supabase isolado.
 3. Executar em demo com os mesmos simbolo, contrato, spread e VPS da conta real.
 4. Preencher o login nos dois lados e armar API e EA apenas durante uma janela monitorada.
 5. Desarmar primeiro `LIVE_CANARY_ARMED` para o kill switch do servidor.

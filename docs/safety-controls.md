@@ -15,15 +15,16 @@ ou impede a inicializacao/execucao do EA.
 | Limite de spread | API e EA | `LIVE_CANARY_MAX_SPREAD_POINTS` e `MaxLiveSpreadPoints` | `15` pontos | API mantem `hold`; EA rele o tick imediatamente antes da ordem e cancela a execucao |
 | SL e TP obrigatorios | API | `stop_loss_price` e `take_profit_price` precisam ser positivos | Obrigatorios | O candidato nao e promovido e permanece `hold` |
 | Persistencia Supabase obrigatoria | API | `DAYTRADE_RESULTS_STORE=SUPABASE`, credenciais validas e estado persistente carregado | Nao configurada | Sem store persistente, o guardiao mantem `hold`; falha de dependencia retorna erro e nao libera ordem |
-| Duas chaves independentes na API | API | `DAYTRADE_ENABLE_LIVE_DECISIONS=true` e `LIVE_CANARY_ARMED=true` | Ambas `false` | Qualquer uma desligada mantem `hold` |
+| Allowlist explícita do bot | API | `LIVE_CANARY_BOT_ID=core-combined-v3` | Vazia | Nenhum bot atravessa o guardião |
+| Duas chaves independentes na API | API | `DAYTRADE_ENABLE_LIVE_DECISIONS=true` e `LIVE_CANARY_ARMED=true` | Ambas `false` | Qualquer uma desligada mantém `hold` |
 | Chave local adicional | EA | `EnableOrderExecution=true` | `false` | O EA consulta e registra sinais, mas nao chama a rotina de execucao |
 | Kill switch pelo servidor | API | Alterar `LIVE_CANARY_ARMED=false` e reiniciar/reimplantar | Desarmado | Respostas voltam imediatamente a `hold`, mesmo que o EA continue habilitado localmente |
 | Execucao nasce desativada | API e EA | Valores versionados em `.env.example` e inputs padrao do EA | Desativada | Sao necessarias ativacoes explicitas e independentes em ambas as camadas |
 
 ## Observacoes de implementacao
 
-- Somente `core-portfolio` esta na allowlist de execucao. Os tres componentes sao consultados
-  exclusivamente em shadow.
+- O único ID que deve ser configurado na allowlist é `core-combined-v3`. Com `LIVE_CANARY_BOT_ID`
+  vazio, o estado versionado, nenhum bot é elegível. Os três componentes são consultados em shadow.
 - A verificacao de posicao na API depende de o cliente enviar `positions`. O EA possui a verificacao
   local autoritativa com `PositionSelect`, portanto nao depende desse payload para impedir duplicidade.
 - Quando habilitado com valor acima de zero, o limite diario do EA usa o horario do servidor da

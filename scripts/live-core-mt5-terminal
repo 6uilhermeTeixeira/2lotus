@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export DISPLAY=:6
+export XAUTHORITY="${XDG_CONFIG_HOME:-$HOME/.config}/live-core-mt5-session/Xauthority"
+export WINEPREFIX="${LIVE_CORE_WINEPREFIX:-$HOME/.local/share/mt5-live-wine}"
+export WINEDEBUG=-all
+
+terminal="$WINEPREFIX/drive_c/Program Files/MetaTrader 5/terminal64.exe"
+installer="$HOME/.local/share/mt5-install/mt5setup.exe"
+secret_file="/run/user/$(id -u)/live-core-mt5-login.txt"
+account_file="/run/user/$(id -u)/live-core-mt5-account.env"
+
+if [[ ! -f "$terminal" ]]; then
+    if [[ ! -f "$installer" ]]; then
+        exec /usr/bin/xterm -title "Live Core MT5" -e sh -c \
+            'echo "Instalador do MT5 indisponível."; sleep 3600'
+    fi
+    exec /usr/bin/wine "$installer"
+fi
+
+# A conta real só é conectada por um arquivo efêmero de três linhas:
+# login, servidor e senha. O arquivo e a configuração temporária são apagados.
+if [[ -f "$account_file" ]]; then
+    login=""
+    server=""
+    password=""
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line%$'\r'}"
+        key="${line%%=*}"
+        value="${line#*=}"
+        case "$key" in
+            LOGIN|MT5_LOGIN) login="$value" ;;
+            SERVER|MT5_SERVER) server="$value" ;;
+            PASSWORD|MT5_PASSWORD) password="$value" ;;
+        esac
+    done < "$account_file"
+    rm -f -- "$account_file"
+    if [[ ! "$login" =~ ^[0-9]+$ ]] || [[ -z "$server" ]] || [[ -z "$password" ]] || \
+       [[ "$server" == *$'\n'* ]] || [[ "$password" == *$'\n'* ]]; then
+        unset login server password value line
+        echo "Arquivo temporário de conta inválido; ele foi apagado." >&2
+        exit 1
+    fi
+    credentials=("$login" "$server" "$password")
+    unset login server password value line
+elif [[ -f "$secret_file" ]]; then
+    mapfile -t credentials < "$secret_file"
+    if [[ ${#credentials[@]} -ne 3 ]] || [[ -z "${credentials[0]}" ]] || \
+       [[ -z "${credentials[1]}" ]] || [[ -z "${credentials[2]}" ]]; then
+        echo "Arquivo temporário de login inválido." >&2
+        exit 1
+    fi
+fi
+
+if [[ ${credentials+x} ]]; then
+    login_config="/run/user/$(id -u)/live-core-mt5-autologin.ini"
+    umask 077
+    printf '[Common]\nLogin=%s\nServer=%s\nPassword=%s\nKeepPrivate=1\n' \
+        "${credentials[0]}" "${credentials[1]}" "${credentials[2]}" > "$login_config"
+    unset credentials
+    rm -f -- "$secret_file" "$account_file"
+    wine_config="Z:\\run\\user\\$(id -u)\\live-core-mt5-autologin.ini"
+    /usr/bin/wine "$terminal" /portable "/config:$wine_config" &
+    terminal_pid=$!
+    sleep 20
+    rm -f -- "$login_config"
+    wait "$terminal_pid"
+    exit $?
+fi
+
+exec /usr/bin/wine "$terminal" /portable

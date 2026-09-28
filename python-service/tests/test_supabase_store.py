@@ -1,8 +1,12 @@
 import unittest
 from datetime import datetime, timezone
+from io import BytesIO
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+from urllib.error import HTTPError
 
-from app.schemas import CandleSnapshot, DecisionResponse, HistoricalReplayResponse, ResultsSummary, TickIngestRequest
-from app.supabase_store import SupabaseStore
+from app.schemas import BotCatalogItem, CandleSnapshot, DecisionResponse, HistoricalReplayResponse, ResultsSummary, TickIngestRequest, TradeResult
+from app.supabase_store import SupabaseRequestError, SupabaseStore
 from tests.test_strategy import bullish_request, macd_trend_request, mean_reversion_request, stochastic_pullback_request
 
 
@@ -98,6 +102,105 @@ class SupabaseStoreTests(unittest.TestCase):
         self.assertEqual(len(store.calls[0][2]), 500)
         self.assertEqual(store.calls[0][3], "resolution=ignore-duplicates,return=minimal")
 
+    def test_store_requires_configuration_and_normalizes_base_url(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "not configured"):
+            SupabaseStore(SimpleNamespace(supabase_results_configured=False))
+        configured = SimpleNamespace(
+            supabase_results_configured=True,
+            supabase_url="https://project.supabase.co/",
+            supabase_service_role_key="key",
+        )
+        store = SupabaseStore(configured)
+        self.assertEqual(store.base_url, "https://project.supabase.co")
+        self.assertEqual(store.key, "key")
+
+    def test_request_maps_auth_and_rate_limit_errors(self) -> None:
+        configured = SimpleNamespace(
+            supabase_results_configured=True,
+            supabase_url="https://project.supabase.co",
+            supabase_service_role_key="key",
+            supabase_retry_attempts=1,
+            supabase_timeout_seconds=0.1,
+        )
+        store = SupabaseStore(configured)
+        for status, code, retryable in ((401, "auth_error", False), (429, "rate_limit", True), (500, "http_error", True)):
+            error = HTTPError("https://project", status, "failed", {}, BytesIO())
+            with self.subTest(status=status), patch("app.supabase_store.urlopen", side_effect=error):
+                with self.assertRaises(SupabaseRequestError) as context:
+                    store._request("bots?select=id")
+            self.assertEqual(context.exception.code, code)
+            self.assertEqual(context.exception.retryable, retryable)
+            self.assertEqual(context.exception.status_code, status)
+
+    def test_backtest_snapshot_loads_valid_payload_and_rejects_missing_rows(self) -> None:
+        store = RecordingStore()
+        timestamp = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        replay = HistoricalReplayResponse(
+            bot_id="bot-1", symbol="XAUUSD", timeframe="M5",
+            period_start_utc=timestamp, period_end_utc=timestamp,
+            candles_evaluated=0, candidates_detected=0, summary=ResultsSummary(),
+        )
+        store._request = MagicMock(return_value=[{"payload": replay.model_dump(mode="json")}])
+        self.assertEqual(store.load_backtest_snapshot("bot-1", 30).bot_id, "bot-1")
+        for rows in (None, [], ["invalid"], [{"payload": "invalid"}]):
+            store._request.return_value = rows
+            with self.subTest(rows=rows):
+                self.assertIsNone(store.load_backtest_snapshot("bot-1", 30))
+
+    def test_trade_and_candle_upserts_are_serialized_and_chunked(self) -> None:
+        store = RecordingStore()
+        timestamp = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        trade = TradeResult(
+            trade_id="trade-1", symbol="XAUUSD", timeframe="M5", setup="test", side="buy",
+            opened_at_utc=timestamp, volume_lots=0.1, entry_price=100,
+        )
+        store.upsert_trade("bot-1", trade)
+        self.assertEqual(store.calls[-1][2]["bot_id"], "bot-1")
+        self.assertEqual(store.calls[-1][2]["raw_payload"]["trade_id"], "trade-1")
+
+        store.calls.clear()
+        store.upsert_candles("bot-1", "XAUUSD", "M5", [])
+        self.assertEqual(store.calls, [])
+        candles = [
+            CandleSnapshot(timestamp_utc=timestamp, open=100, high=101, low=99, close=100, volume=1)
+            for _ in range(1001)
+        ]
+        store.upsert_candles("bot-1", "XAUUSD", "M5", candles)
+        self.assertEqual([len(call[2]) for call in store.calls], [1000, 1])
+
+    def test_candle_loading_paginates_and_returns_chronological_order(self) -> None:
+        store = RecordingStore()
+        bot = BotCatalogItem(id="bot-1", name="Bot", description="test", strategy_profile="test", symbol="XAUUSD", timeframe="M5")
+        newest = {"timestamp_utc": "2026-01-01T00:05:00Z", "open": 2, "high": 2, "low": 2, "close": 2, "volume": 1}
+        oldest = {"timestamp_utc": "2026-01-01T00:00:00Z", "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
+        store._request = MagicMock(return_value=[newest, oldest])
+        candles = store.load_candles(bot, 1000)
+        self.assertEqual([candle.close for candle in candles], [1, 2])
+
+    def test_runtime_decision_and_operations_helpers_preserve_contracts(self) -> None:
+        store = RecordingStore()
+        timestamp = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        store.record_runtime_status("bot-1", request_at=timestamp, candle_at=None, action="hold", reason="safe", latency_ms=1.236)
+        self.assertEqual(store.calls[-1][2]["last_latency_ms"], 1.24)
+        self.assertIsNone(store.calls[-1][2]["last_candle_at_utc"])
+
+        store._request = MagicMock(side_effect=[[{"consecutive_errors": 2}], None])
+        store.record_runtime_failure("bot-1", error_code="network", error_message="x" * 600)
+        failure_payload = store._request.call_args_list[-1].kwargs["payload"]
+        self.assertEqual(failure_payload["consecutive_errors"], 3)
+        self.assertEqual(len(failure_payload["last_error"]), 500)
+
+        response = DecisionResponse(action="hold", reason="safe")
+        store._request = MagicMock(return_value=None)
+        store.save_decision_response("bot-1", "request-1", response)
+        self.assertEqual(store._request.call_args.kwargs["payload"]["response"]["reason"], "safe")
+
+        store._request = MagicMock(side_effect=[[{"response": response.model_dump(mode="json")}], [{"bot_id": "bot-1"}, "bad"], [{"bot_id": "bot-1"}, None]])
+        self.assertEqual(store.load_decision_response("bot-1", "request-1").reason, "safe")
+        statuses, snapshots = store.load_operations()
+        self.assertEqual(statuses, [{"bot_id": "bot-1"}])
+        self.assertEqual(snapshots, [{"bot_id": "bot-1"}])
+
     def test_tick_shadow_buy_applies_trailing_then_closes_on_executable_bid(self) -> None:
         batch = TickIngestRequest(
             collector_id="forward-01", symbol="XAUUSD", point_size=0.01,
@@ -128,6 +231,85 @@ class SupabaseStoreTests(unittest.TestCase):
         self.assertEqual(patch["exit_reason"], "time")
         self.assertEqual(patch["exit_price"], 99.8)
         self.assertAlmostEqual(float(patch["pnl_pips"]), 20)
+
+    def test_tick_shadow_trade_validates_input_existing_position_and_backfill(self) -> None:
+        store = RecordingStore()
+        request = bullish_request(datetime(2026, 7, 31, 10, 20, tzinfo=timezone.utc))
+        response = DecisionResponse(action="hold", reason="shadow")
+        self.assertFalse(store.record_tick_shadow_trade("signal", request, response))
+
+        response = DecisionResponse(
+            action="hold", reason="shadow", entry_price=100, stop_loss_price=99,
+            final_take_profit_price=102,
+            metadata={"suggested_action": "buy", "suggested_size": 0.1},
+        )
+        store._request = MagicMock(return_value=[{"signal_key": "already-open"}])
+        self.assertFalse(store.record_tick_shadow_trade("signal", request, response))
+
+        recent = [
+            {"time_msc": 1_700_000_000_000, "bid": 100, "ask": 100.1},
+            {"time_msc": 1_700_000_000_000, "bid": 100, "ask": 100.1},
+            "invalid",
+        ]
+        store._request = MagicMock(side_effect=[[], None, recent])
+        with patch.object(store, "advance_tick_shadow_trades") as advance:
+            self.assertTrue(store.record_tick_shadow_trade("signal", request, response))
+        inserted = store._request.call_args_list[1].kwargs["payload"]
+        self.assertEqual(inserted["status"], "open")
+        self.assertEqual(inserted["value_per_pip"], 0.1)
+        replay = advance.call_args.args[0]
+        self.assertEqual(len(replay.ticks), 1)
+        self.assertEqual(replay.collector_id, "shadow-backfill")
+
+    def test_advance_tick_shadow_trades_patches_each_valid_open_row(self) -> None:
+        store = RecordingStore()
+        batch = TickIngestRequest(
+            collector_id="forward-01", symbol="XAUUSD", point_size=0.01,
+            ticks=[{"time_msc": 1_700_000_001_000, "sequence": 1, "bid": 100.1, "ask": 100.2}],
+        )
+        row = self.tick_shadow_row()
+        store._request = MagicMock(side_effect=[[row, "invalid"], None])
+        store.advance_tick_shadow_trades(batch)
+        self.assertEqual(store._request.call_count, 2)
+        self.assertEqual(store._request.call_args_list[-1].kwargs["method"], "PATCH")
+
+    def test_paper_trade_advances_partial_target_expiry_and_trailing(self) -> None:
+        base = {
+            "signal_key": "signal", "variant": "technical", "side": "buy",
+            "entry_price": 100, "initial_stop_price": 99, "stop_price": 99,
+            "partial_price": 101, "target_price": 102, "partial_hit": False,
+            "partial_close_pct": 50, "opened_at_utc": "2026-01-01T10:00:00+00:00",
+        }
+        candle = CandleSnapshot(timestamp_utc="2026-01-01T10:05:00Z", open=100, high=101.2, low=99.5, close=101, volume=1)
+
+        store = RecordingStore()
+        store.open_rows = [base]
+        store.advance_paper_trades("bot-1", [candle])
+        self.assertEqual(store.calls[-1][2], {"partial_hit": True, "stop_price": 100.0})
+
+        store = RecordingStore()
+        store.open_rows = [{**base, "partial_hit": True, "stop_price": 100}]
+        target = candle.model_copy(update={"high": 102.1, "low": 100.1})
+        store.advance_paper_trades("bot-1", [target])
+        self.assertEqual(store.calls[-1][2]["status"], "closed")
+        self.assertEqual(store.calls[-1][2]["outcome_r"], 1.5)
+
+        store = RecordingStore()
+        store.open_rows = [{**base, "expires_at_utc": "2026-01-01T10:10:00+00:00"}]
+        quiet = candle.model_copy(update={"high": 100.5, "low": 99.5, "close": 100.25})
+        store.advance_paper_trades("bot-1", [quiet])
+        self.assertEqual(store.calls[-1][2]["outcome_r"], 0.25)
+
+        store = RecordingStore()
+        store.open_rows = [{
+            **base, "partial_price": 110, "target_price": 120,
+            "point_size": 0.01, "break_even_trigger_points": 40,
+            "break_even_offset_points": 0, "trailing_activation_points": 100,
+            "trailing_distance_points": 50,
+        }]
+        favorable = candle.model_copy(update={"high": 101.5, "low": 99.5})
+        store.advance_paper_trades("bot-1", [favorable])
+        self.assertEqual(store.calls[-1][2]["stop_price"], 101.0)
 
     def test_tick_shadow_results_are_exposed_without_looking_like_real_trades(self) -> None:
         results = TickShadowResultsStore()._load_tick_shadow_results("bot-19")

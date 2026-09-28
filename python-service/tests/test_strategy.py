@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from app.schemas import AccountSnapshot, CandleSnapshot, DecisionAction, DecisionRequest, FlowSnapshot, OrderBookLevel, PositionSnapshot
 from app.regime import RegimeSnapshot
-from app.strategy import FlowSample, _flow_analysis, evaluate_decision, reset_strategy_state
+from app.strategy import FlowSample, _flow_analysis, _flow_metrics, _record_flow, evaluate_decision, reset_strategy_state
 
 
 def settings(**overrides: object) -> SimpleNamespace:
@@ -351,6 +351,52 @@ def multitimeframe_buy_request(decision_time: datetime) -> DecisionRequest:
 
 
 class FlowAnalysisTests(unittest.TestCase):
+    def setUp(self) -> None:
+        reset_strategy_state()
+
+    def test_flow_metrics_and_window_pruning_use_valid_volume_only(self) -> None:
+        empty = FlowSnapshot(
+            book=[OrderBookLevel(side="bid", price=100, volume=0)],
+            up_ticks=0, down_ticks=0, up_volume=0, down_volume=0,
+        )
+        self.assertIsNone(_flow_metrics(empty))
+
+        start = datetime(2026, 7, 31, tzinfo=timezone.utc)
+        request = bullish_request(start)
+        first = _record_flow(request, 10)
+        self.assertEqual(len(first), 1)
+        request.timestamp_utc += timedelta(seconds=20)
+        second = _record_flow(request, 10)
+        self.assertEqual(len(second), 1)
+
+        request.flow = None
+        self.assertIsNone(_record_flow(request, 10))
+
+    def test_flow_analysis_reports_unavailable_and_both_warmup_modes(self) -> None:
+        start = datetime(2026, 7, 31, tzinfo=timezone.utc)
+        self.assertEqual(_flow_analysis(None, DecisionAction.BUY, 300, 2, 1).status, "flow_unavailable")
+        short = deque([FlowSample(start, 0, 0)])
+        self.assertEqual(_flow_analysis(short, DecisionAction.BUY, 300, 2, 1).status, "flow_warmup")
+        compressed = deque(
+            [FlowSample(start, 0, 0), FlowSample(start + timedelta(seconds=10), 0.1, 0.1), FlowSample(start + timedelta(seconds=20), 0.2, 0.2)]
+        )
+        self.assertEqual(_flow_analysis(compressed, DecisionAction.BUY, 300, 2, 1).status, "flow_warmup")
+
+    def test_flow_analysis_distinguishes_absorption_and_neutral(self) -> None:
+        start = datetime(2026, 7, 31, tzinfo=timezone.utc)
+        baseline = [FlowSample(start + timedelta(seconds=index * 30), (index % 3 - 1) * 0.01, (index % 3 - 1) * 0.01) for index in range(10)]
+        absorption = _flow_analysis(
+            deque([*baseline, FlowSample(start + timedelta(seconds=300), 0.8, -0.8)]),
+            DecisionAction.BUY, 300, 10, 1,
+        )
+        neutral = _flow_analysis(
+            deque([*baseline, FlowSample(start + timedelta(seconds=300), 0, 0)]),
+            DecisionAction.BUY, 300, 10, 5,
+        )
+        self.assertEqual(absorption.status, "absorption")
+        self.assertTrue(absorption.confirmed)
+        self.assertEqual(neutral.status, "flow_neutral")
+
     def test_strong_directional_flow_is_confirmed(self) -> None:
         start = datetime(2026, 7, 31, tzinfo=timezone.utc)
         samples = deque(

@@ -9,11 +9,11 @@ input string HealthcheckUrl = "http://127.0.0.1:1111/health";
 input string TradeResultsUrl = "http://127.0.0.1:1111/api/trades";
 input string CandleCacheUrl = "http://127.0.0.1:1111/api/candles";
 input string LotusIngestApiKey = "";
-input string ResultsBotId = "core-combined-v3";
-input string StochasticBotId = "core-stochastic-v3";
-input string MultitimeframeBotId = "core-multitimeframe-v3";
-input string ZigZagBotId = "core-zigzag-v3";
-input string PortfolioBotId = "core-combined-v3";
+input string ResultsBotId = "core-zigzag-v10";
+input string StochasticBotId = "core-zigzag-v8";
+input string MultitimeframeBotId = "core-zigzag-v10";
+input string ZigZagBotId = "core-zigzag-v10";
+input string PortfolioBotId = "core-zigzag-v10";
 input string StrategySymbol = "XAUUSD";
 input string StrategyTimeframe = "M5";
 input int HistoryBars = 4000;
@@ -109,7 +109,15 @@ void OnTimer()
    MqlTick tick;
    if(!SymbolInfoTick(_Symbol, tick))
    {
-      Print("Failed to read current tick for symbol ", _Symbol);
+      // Keep the account dashboard alive outside market hours. A heartbeat
+      // carries AccountInfo* fields even when no fresh market tick exists.
+      MqlTick heartbeat;
+      ZeroMemory(heartbeat);
+      heartbeat.bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      heartbeat.ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      string response = "";
+      int status = PostJson(StrategyServiceUrl, BuildDecisionPayload(heartbeat, PortfolioBotId), response);
+      PrintFormat("Account heartbeat bot_id=%s status=%d response=%s", PortfolioBotId, status, response);
       return;
    }
 
@@ -144,8 +152,18 @@ string BuildDecisionPayload(const MqlTick &tick, const string botId)
    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
    double equity = AccountInfoDouble(ACCOUNT_EQUITY);
    double margin_free = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
+   double floating_profit = AccountInfoDouble(ACCOUNT_PROFIT);
+   double realized_profit_today = RealizedProfitToday();
+   MqlDateTime brokerDate;
+   TimeToStruct(TimeCurrent(), brokerDate);
+   string profitDay = StringFormat("%04d-%02d-%02d", brokerDate.year, brokerDate.mon, brokerDate.day);
    long leverage = AccountInfoInteger(ACCOUNT_LEVERAGE);
    long login = AccountInfoInteger(ACCOUNT_LOGIN);
+   string broker = JsonEscape(AccountInfoString(ACCOUNT_COMPANY));
+   string server = JsonEscape(AccountInfoString(ACCOUNT_SERVER));
+   string currency = JsonEscape(AccountInfoString(ACCOUNT_CURRENCY));
+   ENUM_ACCOUNT_TRADE_MODE accountMode = (ENUM_ACCOUNT_TRADE_MODE)AccountInfoInteger(ACCOUNT_TRADE_MODE);
+   string tradeMode = accountMode == ACCOUNT_TRADE_MODE_REAL ? "real" : accountMode == ACCOUNT_TRADE_MODE_CONTEST ? "contest" : "demo";
    double tick_value = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
    double tick_size = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
    double value_per_point_per_lot = 0.0;
@@ -174,9 +192,16 @@ string BuildDecisionPayload(const MqlTick &tick, const string botId)
       "\"positions\":[],"
       "\"account\":{" +
          "\"login\":" + IntegerToString(login) + "," +
+         "\"broker\":\"" + broker + "\"," +
+         "\"server\":\"" + server + "\"," +
+         "\"currency\":\"" + currency + "\"," +
+         "\"trade_mode\":\"" + tradeMode + "\"," +
          "\"balance\":" + DoubleToString(balance, 2) + ","
          "\"equity\":" + DoubleToString(equity, 2) + ","
          "\"margin_free\":" + DoubleToString(margin_free, 2) + ","
+         "\"floating_profit\":" + DoubleToString(floating_profit, 2) + ","
+         "\"realized_profit_today\":" + DoubleToString(realized_profit_today, 2) + ","
+         "\"profit_day\":\"" + profitDay + "\"," +
          "\"leverage\":" + IntegerToString((int)leverage) +
       "},"
       "\"indicators\":" + SerializeImpulseIndicators(tick) +
@@ -191,6 +216,34 @@ string BuildDecisionPayload(const MqlTick &tick, const string botId)
       "}";
 
    return json;
+}
+
+string JsonEscape(string value)
+{
+   StringReplace(value, "\\", "\\\\");
+   StringReplace(value, "\"", "\\\"");
+   return value;
+}
+
+double RealizedProfitToday()
+{
+   MqlDateTime parts;
+   TimeToStruct(TimeCurrent(), parts);
+   parts.hour = 0;
+   parts.min = 0;
+   parts.sec = 0;
+   datetime dayStart = StructToTime(parts);
+   if(!HistorySelect(dayStart, TimeCurrent()))
+      return 0.0;
+   double result = 0.0;
+   for(int index = 0; index < HistoryDealsTotal(); index++)
+   {
+      ulong ticket = HistoryDealGetTicket(index);
+      long entry = HistoryDealGetInteger(ticket, DEAL_ENTRY);
+      if(entry == DEAL_ENTRY_OUT || entry == DEAL_ENTRY_OUT_BY)
+         result += HistoryDealGetDouble(ticket, DEAL_PROFIT) + HistoryDealGetDouble(ticket, DEAL_SWAP) + HistoryDealGetDouble(ticket, DEAL_COMMISSION);
+   }
+   return result;
 }
 
 void RecordImpulseTick(const MqlTick &tick)

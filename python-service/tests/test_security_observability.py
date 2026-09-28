@@ -1,5 +1,8 @@
 import hashlib
 import unittest
+from collections import defaultdict, deque
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from urllib.error import URLError
@@ -9,14 +12,123 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from app.auth import password_matches
+from app import main as main_module
 from app.main import app
 from app.schemas import AccountSnapshot, DecisionRequest, TickIngestRequest
-from app.security import InMemoryRateLimiter, RateLimit
-from app.supabase_store import SupabaseStore
+from app.security import InMemoryRateLimiter, RateLimit, client_key, require_same_origin
+from app.supabase_store import SupabaseRequestError, SupabaseStore
 from app.telemetry import emit_event, metrics_snapshot
 
 
 class SecurityAndObservabilityTests(unittest.TestCase):
+    def test_security_settings_can_disable_one_gate_and_writes_audit(self) -> None:
+        client = TestClient(app)
+        with TemporaryDirectory() as directory:
+            audit_path = Path(directory) / "security-audit.jsonl"
+            with (
+                patch("app.main._require_api_session"),
+                patch.object(main_module.settings, "enable_live_decisions", True),
+                patch.object(main_module.settings, "live_canary_armed", False),
+                patch.object(main_module.settings, "security_audit_path", audit_path),
+            ):
+                response = client.put(
+                    "/api/security-settings",
+                    json={"enable_live_decisions": False, "live_canary_armed": False},
+                )
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json(), {"enable_live_decisions": False, "live_canary_armed": False})
+                self.assertIn('"setting":"enable_live_decisions"', audit_path.read_text(encoding="utf-8"))
+
+    def test_security_settings_reject_enable_without_password(self) -> None:
+        client = TestClient(app)
+        with (
+            patch("app.main._require_api_session"),
+            patch.object(main_module.settings, "enable_live_decisions", False),
+            patch.object(main_module.settings, "live_canary_armed", False),
+        ):
+            response = client.put(
+                "/api/security-settings",
+                json={"enable_live_decisions": True, "live_canary_armed": False},
+            )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_security_settings_enable_requires_ready_prerequisites(self) -> None:
+        client = TestClient(app)
+        with TemporaryDirectory() as directory:
+            with (
+                patch("app.main._require_api_session"),
+                patch("app.main._canary_readiness_checks", return_value={"all": True}),
+                patch.object(main_module.settings, "dashboard_password", "correct-password"),
+                patch.object(main_module.settings, "enable_live_decisions", False),
+                patch.object(main_module.settings, "live_canary_armed", False),
+                patch.object(main_module.settings, "security_audit_path", Path(directory) / "audit.jsonl"),
+            ):
+                response = client.put(
+                    "/api/security-settings",
+                    json={
+                        "enable_live_decisions": True,
+                        "live_canary_armed": False,
+                        "password": "correct-password",
+                    },
+                )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["enable_live_decisions"])
+
+    def test_security_settings_reject_changing_both_gates_together(self) -> None:
+        with (
+            patch("app.main._require_api_session"),
+            patch.object(main_module.settings, "enable_live_decisions", False),
+            patch.object(main_module.settings, "live_canary_armed", False),
+        ):
+            response = TestClient(app).put(
+                "/api/security-settings",
+                json={"enable_live_decisions": True, "live_canary_armed": True, "password": "irrelevant"},
+            )
+
+        self.assertEqual(response.status_code, 422)
+
+    def test_canary_readiness_is_distinct_from_application_readiness(self) -> None:
+        with (
+            patch("app.main._require_api_session"),
+            patch("app.main.canary_prerequisites", return_value={"supabase_store": False}),
+        ):
+            response = TestClient(app).get("/api/canary-readiness")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "blocked")
+        self.assertFalse(response.json()["ready"])
+
+    def test_canary_readiness_requires_live_supabase_connectivity(self) -> None:
+        prerequisites = {"supabase_store": True, "supabase_credentials": True, "other": True}
+        store = MagicMock()
+        store.readiness.side_effect = SupabaseRequestError("offline", code="network_error")
+        with (
+            patch("app.main._require_api_session"),
+            patch("app.main.canary_prerequisites", return_value=prerequisites),
+            patch("app.main.SupabaseStore", return_value=store),
+        ):
+            response = TestClient(app).get("/api/canary-readiness")
+
+        self.assertEqual(response.json()["status"], "blocked")
+        self.assertFalse(response.json()["checks"]["supabase_connectivity"])
+
+    def test_canary_readiness_passes_after_supabase_probe(self) -> None:
+        prerequisites = {"supabase_store": True, "supabase_credentials": True, "other": True}
+        store = MagicMock()
+        with (
+            patch("app.main._require_api_session"),
+            patch("app.main.canary_prerequisites", return_value=prerequisites),
+            patch("app.main.SupabaseStore", return_value=store),
+        ):
+            response = TestClient(app).get("/api/canary-readiness")
+
+        self.assertEqual(response.json()["status"], "ready")
+        self.assertTrue(response.json()["checks"]["supabase_connectivity"])
+        store.readiness.assert_called_once()
+
     def test_health_and_readiness_have_distinct_contracts(self) -> None:
         client = TestClient(app)
         health = client.get("/health")
@@ -38,6 +150,34 @@ class SecurityAndObservabilityTests(unittest.TestCase):
         with self.assertRaises(HTTPException) as context:
             limiter.check("login:local", RateLimit(1, 60))
         self.assertEqual(context.exception.status_code, 429)
+
+    def test_rate_limiter_evicts_expired_capacity_and_rejects_live_capacity(self) -> None:
+        limiter = InMemoryRateLimiter()
+        limiter._attempts = defaultdict(deque, {f"old-{index}": deque([0.0]) for index in range(10_000)})
+        with patch("app.security.monotonic", return_value=100):
+            limiter.check("new", RateLimit(1, 10))
+        self.assertEqual(list(limiter._attempts), ["new"])
+
+        limiter._attempts = defaultdict(deque, {f"live-{index}": deque([100.0]) for index in range(10_000)})
+        with patch("app.security.monotonic", return_value=100), self.assertRaisesRegex(HTTPException, "capacity"):
+            limiter.check("overflow", RateLimit(1, 10))
+
+    def test_rate_limiter_removes_expired_attempts_for_existing_key(self) -> None:
+        limiter = InMemoryRateLimiter()
+        limiter._attempts["login:old"].append(0)
+        with patch("app.security.monotonic", return_value=100):
+            limiter.check("login:old", RateLimit(1, 10))
+        self.assertEqual(list(limiter._attempts["login:old"]), [100])
+
+    def test_origin_validation_and_client_key_cover_missing_client(self) -> None:
+        request = MagicMock()
+        request.method = "POST"
+        request.url.path = "/logout"
+        request.headers = {"origin": "https://attacker.example", "host": "lotus.example"}
+        with self.assertRaisesRegex(HTTPException, "origin mismatch"):
+            require_same_origin(request)
+        request.client = None
+        self.assertEqual(client_key(request, "login"), "login:unknown")
 
     def test_scrypt_password_format_is_supported(self) -> None:
         salt = b"0123456789abcdef"

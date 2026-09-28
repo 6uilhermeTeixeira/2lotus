@@ -1,42 +1,22 @@
 [
   {
-    "id": "core-zigzag-v3",
-    "name": "ZigZag Scalper V3",
-    "description": "Alterna causalmente entre o V1 em volatilidade normal e o V2 estrutural durante expansões do range M5.",
-    "strategy_profile": "zigzag_scalper_v3_adaptive_shadow",
-    "strategy_description": "- Agrega candles M5 completos em M30.\n- Detecta pivôs causais com duas velas de confirmação em cada lado.\n- Entra no rompimento do último pivô entre 03:00 e 19:00 UTC.\n- Usa stop de 240 pontos, alvo de 1000 pontos e saída temporal de até 2 candles M5.\n- Permanece em shadow como componente isolado.",
+    "id": "core-zigzag-v10",
+    "name": "ZigZag Scalper V4.0",
+    "description": "Roteador de Contexto que seleciona o filtro contextual de compra ou venda.",
+    "strategy_profile": "zigzag_scalper_v10_context_router_shadow",
+    "strategy_description": "- Compra: seleciona o filtro contextual V3.2.\n- Venda: seleciona o filtro contextual V3.1.\n- A V2.1 permanece como origem única do gatilho.\n- O ramo alternativo não é avaliado.\n- Execução permanentemente bloqueada em shadow.",
     "symbol": "XAUUSD",
     "timeframe": "M5",
-    "results_file": "results/core-zigzag-v3.json"
+    "results_file": "backtests/core-zigzag-v10-365.json"
   },
   {
-    "id": "core-stochastic-v3",
-    "name": "Stochastic Sell V3",
-    "description": "Regime adaptativo que preserva a geometria da V2 nos contextos H1 robustos e evita horários e regimes fracos.",
-    "strategy_profile": "stochastic_sell_v3_adaptive_shadow",
-    "strategy_description": "- Exige preço abaixo da EMA50 no M5.\n- Confirma cruzamento baixista do Estocástico 14/3/3 a partir da região de 65 ou superior.\n- Aceita somente vendas e bloqueia entradas às 18:00 UTC ou depois.\n- Posiciona o stop acima das últimas 3 velas acrescido de 0,25 ATR.\n- Define parcial em 1R e alvo final em 2R; permanece em shadow isoladamente.",
+    "id": "core-zigzag-v8",
+    "name": "ZigZag Scalper V5.1",
+    "description": "Filtro temporal de calendário mensal aplicado ao ramo ZigZag contextual.",
+    "strategy_profile": "zigzag_scalper_v8_accuracy_cycle_shadow",
+    "strategy_description": "- Aplica calendário seletivo de semanas e dias em UTC.\n- Mantém o sinal e o risco herdados do roteador temporal V6.0.\n- Estratégia experimental exclusivamente shadow.\n- Requer replay unificado e validação forward independente.",
     "symbol": "XAUUSD",
     "timeframe": "M5",
-    "results_file": "results/core-stochastic-v3.json"
-  },
-  {
-    "id": "core-multitimeframe-v3",
-    "name": "Tendência Multitemporal V3",
-    "description": "Alterna causalmente entre as geometrias V1 e V2 conforme o regime H1 e evita tendências contrárias.",
-    "strategy_profile": "multitimeframe_trend_pullback_v3_adaptive_shadow",
-    "strategy_description": "- Opera somente compras entre 13:00 e 16:00 UTC.\n- Exige EMA20 acima da EMA50 e inclinada para cima no H1.\n- Exige força H1 mínima de 0,7 ATR e EMA9 acima da EMA21 no M15.\n- Confirma pullback e rejeição sobre a EMA9 no M5.\n- Usa stop de 1,2 ATR, alvo de 0,75R, risco multiplicado por 0,5 e até 12 candles M5.",
-    "symbol": "XAUUSD",
-    "timeframe": "M5",
-    "results_file": "results/core-multitimeframe-v3.json"
-  },
-  {
-    "id": "core-combined-v3",
-    "name": "Combinação das 3 V3",
-    "description": "Portfólio paralelo das três V3, com posições simultâneas e risco independente por estratégia.",
-    "strategy_profile": "portfolio_v3_adaptive_union_shadow",
-    "strategy_description": "- Coordena ZigZag, Tendência Multitemporal e Stochastic Sell no mesmo orçamento de risco.\n- Prioriza o ZigZag confirmado; no portfólio 7/6, Tendência Multitemporal tem prioridade sobre Stochastic.\n- Bloqueia sinais simultâneos em direções opostas.\n- Para Stochastic, exige regime de tendência vendedora.\n- Opera somente entre 06:00 e 19:00 UTC e permite no máximo uma posição XAUUSD.\n- É o único perfil elegível ao canário real, sujeito a todas as proteções de docs/safety-controls.md.",
-    "symbol": "XAUUSD",
-    "timeframe": "M5",
-    "results_file": "results/core-combined-v3.json"
+    "results_file": "backtests/core-zigzag-v8-365.json"
   }
 ]

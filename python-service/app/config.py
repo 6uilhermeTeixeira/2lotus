@@ -10,6 +10,16 @@ class Settings:
         self.app_name = getenv("DAYTRADE_APP_NAME", "live-core")
         self.host = getenv("DAYTRADE_HOST", "127.0.0.1")
         self.port = int(getenv("DAYTRADE_PORT", "1111"))
+        self.execution_server_provider = getenv("DAYTRADE_EXECUTION_SERVER_PROVIDER", "fxvps.pro")
+        self.execution_server_host = getenv("DAYTRADE_EXECUTION_SERVER_HOST", "")
+        self.execution_server_region = getenv("DAYTRADE_EXECUTION_SERVER_REGION", "")
+        self.execution_server_ssh_user = getenv("DAYTRADE_EXECUTION_SERVER_SSH_USER", "")
+        self.execution_server_ssh_port = int(getenv("DAYTRADE_EXECUTION_SERVER_SSH_PORT", "22"))
+        self.execution_server_api_url = getenv("DAYTRADE_EXECUTION_SERVER_API_URL", "")
+        self.execution_results_target = getenv("DAYTRADE_EXECUTION_RESULTS_TARGET", "SUPABASE").upper()
+        self.security_audit_path = Path(
+            getenv("DAYTRADE_SECURITY_AUDIT_PATH", str(service_root.parent / ".runtime" / "security-audit.jsonl"))
+        )
         self.strategy_profile = getenv("DAYTRADE_STRATEGY_PROFILE", "portfolio_v3_adaptive_union_shadow")
         self.default_symbol = getenv("DAYTRADE_DEFAULT_SYMBOL", "XAUUSD")
         self.default_timeframe = getenv("DAYTRADE_DEFAULT_TIMEFRAME", "M5")
@@ -19,6 +29,8 @@ class Settings:
         self.enable_live_decisions = getenv("DAYTRADE_ENABLE_LIVE_DECISIONS", "false").lower() == "true"
         self.live_canary_armed = getenv("LIVE_CANARY_ARMED", "false").lower() == "true"
         self.live_canary_account_login = int(getenv("LIVE_CANARY_ACCOUNT_LOGIN", "0"))
+        self.mt5_server = getenv("DAYTRADE_MT5_SERVER", "")
+        self.mt5_initial_balance = float(getenv("DAYTRADE_MT5_INITIAL_BALANCE", "0"))
         self.live_canary_bot_id = getenv("LIVE_CANARY_BOT_ID", "")
         self.live_canary_max_lot = float(getenv("LIVE_CANARY_MAX_LOT", "0.01"))
         self.live_canary_max_spread_points = float(getenv("LIVE_CANARY_MAX_SPREAD_POINTS", "15"))
@@ -130,6 +142,10 @@ class Settings:
             raise ValueError("Supabase timeout/retry settings are invalid")
         if self.tick_ingest_rate_limit_per_minute <= 0:
             raise ValueError("DAYTRADE_TICK_INGEST_RATE_LIMIT_PER_MINUTE must be positive")
+        if not 1 <= self.execution_server_ssh_port <= 65535:
+            raise ValueError("DAYTRADE_EXECUTION_SERVER_SSH_PORT must be between 1 and 65535")
+        if self.execution_results_target not in {"SUPABASE", "SQLITE", "API"}:
+            raise ValueError("DAYTRADE_EXECUTION_RESULTS_TARGET must be SUPABASE, SQLITE or API")
         if not 0 < self.live_canary_max_lot <= 0.01:
             raise ValueError("LIVE_CANARY_MAX_LOT must be between 0 and 0.01")
         if self.session_secret and len(self.session_secret) < 32:

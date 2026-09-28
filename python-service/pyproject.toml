@@ -16,7 +16,7 @@ source = ["app"]
 omit = ["app/pages.py"]
 
 [tool.coverage.report]
-fail_under = 55
+fail_under = 90
 skip_covered = true
 
 [tool.ruff]

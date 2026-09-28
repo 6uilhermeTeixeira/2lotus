@@ -160,9 +160,11 @@ class SQLiteStore:
     def load_operations(self) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
         with self.connect() as connection:
             rows = connection.execute(
-                """SELECT d.* FROM decisions d JOIN (
-                   SELECT bot_id,MAX(requested_at_utc) requested_at_utc FROM decisions GROUP BY bot_id
-                   ) latest ON latest.bot_id=d.bot_id AND latest.requested_at_utc=d.requested_at_utc"""
+                """SELECT * FROM (
+                   SELECT d.*, ROW_NUMBER() OVER (
+                     PARTITION BY bot_id ORDER BY requested_at_utc DESC, rowid DESC
+                   ) AS latest_rank FROM decisions d
+                ) ranked WHERE latest_rank=1"""
             ).fetchall()
         statuses = [{
             "bot_id": row["bot_id"], "last_request_at_utc": row["requested_at_utc"],

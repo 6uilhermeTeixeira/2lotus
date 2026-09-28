@@ -5,11 +5,15 @@ A especificacao completa das travas, seus valores padrao e o comportamento fail-
 
 ## Required before arming
 
+- Dedicated `live-core` service active and isolated from the `2lotus` demo service.
+- Real account connected only to `live-core`; the existing demo account remains on `2lotus`.
+- Independent runtime secrets, persistence, ingest key, logs and alerting for each service.
 - Dedicated Supabase project with the existing 2Lotus schema and only the four core bot rows.
 - Unique ingest key and service-role key stored only in the runtime secret manager.
 - MT5/VPS clock checked against UTC; strategy sessions are evaluated in UTC.
 - Demo smoke test using the same broker symbol, contract size and VPS route intended for live.
-- `core-portfolio` returning valid stop loss and take profit while execution remains disabled.
+- `LIVE_CANARY_BOT_ID=core-combined-v3` somente na configuração controlada do canário.
+- `core-combined-v3` retornando stop loss e take profit válidos enquanto a execução permanece desativada.
 - MT5 journal showing the expected account login, spread and daily-entry guards.
 
 ## First canary window
@@ -18,6 +22,7 @@ A especificacao completa das travas, seus valores padrao e o comportamento fail-
 - EA: matching `AllowedAccountLogin`, `MaxLiveLot=0.01`, `MaxLiveEntriesPerDay=0` para remover o limite diario.
 - Human monitoring of the terminal and server logs for the full position lifecycle.
 - Stop immediately on symbol mismatch, stale candles, rejected stops, abnormal spread or API errors.
+- Do not reuse the demo service as fallback for the real account.
 
 ## Kill switch
 

@@ -8,12 +8,24 @@ from app.pages import (
     render_operations_page,
     render_results_page,
     render_security_page,
+    render_server_page,
     render_trades_page,
 )
 from app.schemas import BotCatalogItem
 
 
 class ComparisonPageTests(unittest.TestCase):
+    def test_server_page_exposes_connection_and_data_flow(self) -> None:
+        html = bytes(render_server_page().body).decode("utf-8")
+
+        self.assertIn(">Servidor</span>", html)
+        self.assertIn("Dados da conexão", html)
+        self.assertIn("Fusion Markets", html)
+        self.assertIn("ZigZag Scalper", html)
+        self.assertIn("Persistência central", html)
+        self.assertIn("Painel Live Core", html)
+        self.assertIn("fetch('/config')", html)
+
     def test_catalog_renders_only_selected_strategies(self) -> None:
         active_bots = [
             BotCatalogItem(id=f"bot-{index}", name=name, description="Teste", strategy_profile="fimath_ema20_flow", symbol="XAUUSD", timeframe="M5")
@@ -33,7 +45,7 @@ class ComparisonPageTests(unittest.TestCase):
         self.assertNotIn('/growth-simulator', html)
         self.assertNotIn('/compare', html)
         nav_html = html[html.index('<nav class="app-nav">'):html.index('</nav>')]
-        navigation = [nav_html.index(label) for label in ('Visão geral', 'Estratégias ativas', 'Operações', 'Saúde operacional', 'Segurança Live Core')]
+        navigation = [nav_html.index(label) for label in ('Estratégias ativas', 'Visão geral', 'Operações', 'Saúde operacional', 'Segurança')]
         self.assertEqual(navigation, sorted(navigation))
         self.assertIn('Live workspace', html)
         self.assertIn('/operations', html)
@@ -66,14 +78,36 @@ class ComparisonPageTests(unittest.TestCase):
         self.assertIn("/results", html)
         self.assertIn('id="trade-rows"', html)
 
-    def test_security_page_exposes_read_only_gates(self) -> None:
+    def test_security_page_exposes_runtime_controls(self) -> None:
         html = bytes(render_security_page().body).decode("utf-8")
 
         self.assertIn("Segurança Live Core", html)
-        self.assertIn("SOMENTE LEITURA", html)
+        self.assertIn("Configurações de execução", html)
+        self.assertIn('id="enable-live-decisions"', html)
+        self.assertIn('id="live-canary-armed"', html)
+        self.assertIn("DAYTRADE_ENABLE_LIVE_DECISIONS", html)
+        self.assertIn("LIVE_CANARY_ARMED", html)
+        self.assertIn("/api/security-settings", html)
+        self.assertIn("/api/canary-readiness", html)
+        self.assertIn("Confirme sua senha", html)
+        self.assertNotIn('href="/settings"', html)
+        self.assertIn(">Segurança</span>", html)
+        self.assertIn('id="execution-settings"', html)
+        self.assertLess(html.index('id="execution-settings"'), html.index('class="security-hero panel"'))
         self.assertIn("fetch('/config')", html)
         self.assertIn("fetch('/ready')", html)
         self.assertIn("fetch('/api/promoted-strategies')", html)
+        self.assertIn('data-security-tab="harness"', html)
+        self.assertIn(">Testes Harness</button>", html)
+        self.assertIn('id="run-harness"', html)
+        self.assertIn("/api/metrics", html)
+        self.assertIn("Telemetria do Harness", html)
+        self.assertIn("Fail-closed de decisões reais", html)
+        self.assertIn("/api/harness/tests/live-decisions-fail-closed", html)
+        self.assertIn("Fail-closed do canário desarmado", html)
+        self.assertIn("/api/harness/tests/canary-disarmed-fail-closed", html)
+        self.assertIn("não envia ordens", html)
+        self.assertLess(html.index('id="execution-settings"'), html.index('data-security-tab="harness"'))
 
     def test_growth_simulator_has_custom_balance_and_risk_controls(self) -> None:
         html = bytes(render_growth_simulator_page().body).decode("utf-8")
