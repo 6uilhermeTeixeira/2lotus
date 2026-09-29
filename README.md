@@ -1,6 +1,6 @@
-# 3lotus Operations
+# 2lotus Operations
 
-Registro operacional, telemetria, auditoria e resultados do runner 2lotus. O serviço novo usa a porta `7773`; durante a migração, as rotas históricas de decisão permanecem apenas para compatibilidade e continuam desarmadas por padrão.
+Registro operacional, telemetria, auditoria e resultados do runner 3lotus. O serviço novo usa a porta `7772`; durante a migração, as rotas históricas de decisão permanecem apenas para compatibilidade e continuam desarmadas por padrão.
 
 O endpoint `POST /api/v1/events/batch` recebe lotes idempotentes autenticados por `LOTUS_OPERATIONAL_EVENT_TOKEN`. A chave `event_id` impede duplicação durante retries da outbox da VPS.
 
