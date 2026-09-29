@@ -7,9 +7,9 @@ class Settings:
     def __init__(self) -> None:
         service_root = Path(__file__).resolve().parent.parent
         self.lotus_data_root = Path(getenv("LOTUS_DATA_ROOT", "/home/codexops/lotus-data"))
-        self.app_name = getenv("DAYTRADE_APP_NAME", "live-core")
+        self.app_name = getenv("DAYTRADE_APP_NAME", "3lotus-operations")
         self.host = getenv("DAYTRADE_HOST", "127.0.0.1")
-        self.port = int(getenv("DAYTRADE_PORT", "1111"))
+        self.port = int(getenv("DAYTRADE_PORT", "7773"))
         self.execution_server_provider = getenv("DAYTRADE_EXECUTION_SERVER_PROVIDER", "fxvps.pro")
         self.execution_server_host = getenv("DAYTRADE_EXECUTION_SERVER_HOST", "")
         self.execution_server_region = getenv("DAYTRADE_EXECUTION_SERVER_REGION", "")
@@ -120,6 +120,7 @@ class Settings:
         self.supabase_url = getenv("DAYTRADE_SUPABASE_URL")
         self.supabase_service_role_key = getenv("DAYTRADE_SUPABASE_SERVICE_ROLE_KEY")
         self.ingest_api_key = getenv("DAYTRADE_INGEST_API_KEY")
+        self.operational_event_token = getenv("LOTUS_OPERATIONAL_EVENT_TOKEN", "")
         self.supabase_timeout_seconds = float(getenv("DAYTRADE_SUPABASE_TIMEOUT_SECONDS", "2.0"))
         self.supabase_retry_attempts = int(getenv("DAYTRADE_SUPABASE_RETRY_ATTEMPTS", "2"))
         self.login_rate_limit_attempts = int(getenv("DAYTRADE_LOGIN_RATE_LIMIT_ATTEMPTS", "5"))

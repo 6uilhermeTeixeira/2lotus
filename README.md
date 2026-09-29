@@ -1,9 +1,13 @@
-# 2Lotus Live Core
+# 3lotus Operations
+
+Registro operacional, telemetria, auditoria e resultados do runner 2lotus. O serviço novo usa a porta `7773`; durante a migração, as rotas históricas de decisão permanecem apenas para compatibilidade e continuam desarmadas por padrão.
+
+O endpoint `POST /api/v1/events/batch` recebe lotes idempotentes autenticados por `LOTUS_OPERATIONAL_EVENT_TOKEN`. A chave `event_id` impede duplicação durante retries da outbox da VPS.
 
 Operação simultânea demo/real: consulte [docs/two-account-runtime.md](docs/two-account-runtime.md).
 
 Núcleo operacional isolado para acompanhar estratégias promovidas pelo 2Lotus em XAUUSD/M5.
-O dashboard protegido é servido localmente em `http://127.0.0.1:1111`.
+O dashboard protegido é servido localmente em `http://127.0.0.1:7773`.
 
 O código está preparado, mas o serviço dedicado `live-core` está atualmente ocioso. O Live Core em
 uso ainda roda no serviço `2lotus`, junto da conta demo já registrada. O estado-alvo é mover o Live
@@ -39,10 +43,10 @@ latencia, slippage e especificacoes da corretora.
 cd python-service
 cp ../.env.example .env
 docker build -t live-core .
-docker run --rm --env-file .env -p 1111:1111 live-core
+docker run --rm --env-file .env -p 7773:7773 live-core
 ```
 
-Depois, adicione `http://127.0.0.1:1111` na allowlist de WebRequest do MT5, compile
+Depois, adicione `http://127.0.0.1:7773` na allowlist de WebRequest do MT5, compile
 `mt5/experts/LiveCoreBridgeEA.mq5` e mantenha `EnableOrderExecution=false` no primeiro ciclo.
 
 ## Promocao controlada

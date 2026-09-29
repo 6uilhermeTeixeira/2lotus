@@ -28,7 +28,7 @@ from .results_store import (
     resolve_bot_results_file,
 )
 from .security import RateLimit, client_key, rate_limiter, require_same_origin
-from .schemas import AccountDashboardResponse, AccountSnapshot, BacktestMarketChartResponse, BotCatalogItem, CandleIngestRequest, CandleSnapshot, DecisionAction, DecisionRequest, DecisionResponse, EquityComparisonResponse, EquityPoint, EquitySeries, GrowthSimulationRequest, GrowthSimulationResponse, HealthResponse, HistoricalReplayResponse, LiveSecuritySettingsUpdate, MarketChartResponse, OperationsResponse, ResultsResponse, ResultsSummary, RuntimeStatusItem, TickIngestRequest, TradeIngestRequest
+from .schemas import AccountDashboardResponse, AccountSnapshot, BacktestMarketChartResponse, BotCatalogItem, CandleIngestRequest, CandleSnapshot, DecisionAction, DecisionRequest, DecisionResponse, EquityComparisonResponse, EquityPoint, EquitySeries, GrowthSimulationRequest, GrowthSimulationResponse, HealthResponse, HistoricalReplayResponse, LiveSecuritySettingsUpdate, MarketChartResponse, OperationalEventBatch, OperationsResponse, ResultsResponse, ResultsSummary, RuntimeStatusItem, TickIngestRequest, TradeIngestRequest
 from .sqlite_store import SQLiteStore
 from .strategy import HAPPY_GOLD_COMBINED_PROFILE, WEIGHTED_PORTFOLIO_PROFILES, evaluate_decision
 from .supabase_store import SupabaseRequestError, SupabaseStore
@@ -41,7 +41,9 @@ settings = get_settings()
 app = FastAPI(title=settings.app_name)
 app.mount("/static", StaticFiles(directory=Path(__file__).resolve().parent / "static"), name="static")
 BRAND_ICON_PATH = Path(__file__).resolve().parent / "static" / "brand" / "icon-1-black.png"
-CORE_BOT_IDS = {"core-zigzag-v10", "core-zigzag-v8"}
+# Legacy strategy routes remain readable during the staged migration. New runner
+# decisions originate in 2lotus; these IDs are retained only for compatibility.
+CORE_BOT_IDS = {"core-zigzag-v10", "core-zigzag-v8", "core-zigzag-v3", "core-combined-v3"}
 latest_live_account: tuple[AccountSnapshot, datetime] | None = None
 first_live_balance: float | None = None
 
@@ -721,6 +723,20 @@ def readiness() -> JSONResponse:
     return JSONResponse(content={"status": "ready", "checks": checks})
 
 
+@app.post("/api/v1/events/batch")
+def ingest_operational_events(
+    payload: OperationalEventBatch,
+    authorization: str | None = Header(default=None),
+) -> dict[str, list[str]]:
+    if not settings.operational_event_token:
+        raise HTTPException(status_code=503, detail="operational event ingestion is not configured")
+    expected = f"Bearer {settings.operational_event_token}"
+    if authorization is None or not compare_digest(authorization, expected):
+        raise HTTPException(status_code=401, detail="invalid operational event token")
+    accepted, duplicates = SQLiteStore(settings).insert_operational_events(payload.events)
+    return {"accepted": accepted, "duplicates": duplicates, "rejected": []}
+
+
 @app.get("/api/metrics")
 def read_metrics(request: Request) -> dict[str, object]:
     _require_api_session(request)
@@ -867,10 +883,17 @@ def decision(payload: DecisionRequest, request: Request, x_2lotus_ingest_key: st
     strategy_profile = settings.strategy_profile
     try:
         if payload.bot_id:
-            bot = _find_bot(payload.bot_id)
-            strategy_profile = bot.strategy_profile
-            if bot.symbol != payload.symbol or bot.timeframe != payload.timeframe:
-                raise HTTPException(status_code=422, detail="decision symbol or timeframe does not match bot configuration")
+            try:
+                bot = _find_bot(payload.bot_id)
+            except HTTPException:
+                if payload.bot_id == settings.live_canary_bot_id and not (_uses_supabase_results() or _uses_sqlite_results()):
+                    bot = None
+                else:
+                    raise
+            if bot is not None:
+                strategy_profile = bot.strategy_profile
+                if bot.symbol != payload.symbol or bot.timeframe != payload.timeframe:
+                    raise HTTPException(status_code=422, detail="decision symbol or timeframe does not match bot configuration")
         if payload.bot_id and _uses_supabase_results():
             store = SupabaseStore(settings)
             cached_response = store.load_decision_response(payload.bot_id, payload.request_id)

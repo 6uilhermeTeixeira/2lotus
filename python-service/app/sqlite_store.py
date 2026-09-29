@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .config import Settings
 from .results_store import build_results_snapshot
-from .schemas import CandleSnapshot, DecisionRequest, DecisionResponse, HistoricalReplayResponse, MarketChartResponse, ResultsResponse, TickIngestRequest, TradeResult
+from .schemas import CandleSnapshot, DecisionRequest, DecisionResponse, HistoricalReplayResponse, MarketChartResponse, OperationalEvent, ResultsResponse, TickIngestRequest, TradeResult
 
 
 SCHEMA = """
@@ -71,6 +71,19 @@ CREATE TABLE IF NOT EXISTS backtest_snapshots (
   updated_at_utc TEXT NOT NULL,
   PRIMARY KEY (bot_id, period_days)
 );
+CREATE TABLE IF NOT EXISTS operational_events (
+  event_id TEXT PRIMARY KEY,
+  runner_id TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  emitted_at_utc TEXT NOT NULL,
+  strategy_id TEXT NOT NULL,
+  strategy_version TEXT NOT NULL,
+  account_environment TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  received_at_utc TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_operational_events_runner_time
+  ON operational_events(runner_id, emitted_at_utc DESC);
 """
 
 
@@ -94,6 +107,32 @@ class SQLiteStore:
     def readiness(self) -> None:
         with self.connect() as connection:
             connection.execute("SELECT 1").fetchone()
+
+    def insert_operational_events(self, events: list[OperationalEvent]) -> tuple[list[str], list[str]]:
+        accepted: list[str] = []
+        duplicates: list[str] = []
+        received_at = datetime.now(timezone.utc).isoformat()
+        with self.connect() as connection:
+            for event in events:
+                cursor = connection.execute(
+                    """INSERT OR IGNORE INTO operational_events(
+                       event_id,runner_id,event_type,emitted_at_utc,strategy_id,strategy_version,
+                       account_environment,payload_json,received_at_utc
+                       ) VALUES(?,?,?,?,?,?,?,?,?)""",
+                    (
+                        event.event_id,
+                        event.runner_id,
+                        event.event_type,
+                        event.emitted_at_utc.isoformat(),
+                        event.strategy_id,
+                        event.strategy_version,
+                        event.account_environment,
+                        event.model_dump_json(),
+                        received_at,
+                    ),
+                )
+                (accepted if cursor.rowcount else duplicates).append(event.event_id)
+        return accepted, duplicates
 
     def upsert_trade(self, bot_id: str, trade: TradeResult) -> None:
         payload = trade.model_dump(mode="json")

@@ -1,7 +1,7 @@
-StrategyServiceUrl=http://127.0.0.1:1111/decision
-HealthcheckUrl=http://127.0.0.1:1111/health
-TradeResultsUrl=http://127.0.0.1:1111/api/trades
-CandleCacheUrl=http://127.0.0.1:1111/api/candles
+StrategyServiceUrl=http://127.0.0.1:7773/decision
+HealthcheckUrl=http://127.0.0.1:7773/health
+TradeResultsUrl=http://127.0.0.1:7773/api/trades
+CandleCacheUrl=http://127.0.0.1:7773/api/candles
 LotusIngestApiKey=lotus-local-ingest-4006488-20260913-7d4c9a2e8f61
 ResultsBotId=core-zigzag-v10
 StochasticBotId=core-zigzag-v8

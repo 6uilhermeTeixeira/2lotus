@@ -4,10 +4,10 @@
 #define IMPULSE_TICK_CAPACITY 65536
 #define IMPULSE_RETENTION_MSC 905000
 
-input string StrategyServiceUrl = "http://127.0.0.1:1111/decision";
-input string HealthcheckUrl = "http://127.0.0.1:1111/health";
-input string TradeResultsUrl = "http://127.0.0.1:1111/api/trades";
-input string CandleCacheUrl = "http://127.0.0.1:1111/api/candles";
+input string StrategyServiceUrl = "http://127.0.0.1:7773/decision";
+input string HealthcheckUrl = "http://127.0.0.1:7773/health";
+input string TradeResultsUrl = "http://127.0.0.1:7773/api/trades";
+input string CandleCacheUrl = "http://127.0.0.1:7773/api/candles";
 input string LotusIngestApiKey = "";
 input string ResultsBotId = "core-zigzag-v10";
 input string StochasticBotId = "core-zigzag-v8";

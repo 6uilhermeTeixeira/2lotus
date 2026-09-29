@@ -1,4 +1,4 @@
-# Estado técnico atual — 2Lotus Live Core
+# Estado técnico atual — 3lotus Operations
 
 Atualizado em 2026-09-10 e validado contra o commit `71d11e2`.
 

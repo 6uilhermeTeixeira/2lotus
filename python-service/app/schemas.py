@@ -12,6 +12,22 @@ class DecisionAction(str, Enum):
     CLOSE = "close"
 
 
+class OperationalEvent(BaseModel):
+    schema_version: str = Field(pattern=r"^1\.0$")
+    event_id: str = Field(min_length=8, max_length=128)
+    runner_id: str = Field(min_length=1, max_length=128)
+    event_type: str = Field(min_length=1, max_length=64)
+    emitted_at_utc: datetime
+    strategy_id: str = Field(default="", max_length=128)
+    strategy_version: str = Field(default="", max_length=128)
+    account_environment: str = Field(default="unknown", max_length=32)
+    payload: dict[str, object]
+
+
+class OperationalEventBatch(BaseModel):
+    events: list[OperationalEvent] = Field(min_length=1, max_length=100)
+
+
 class PositionSnapshot(BaseModel):
     symbol: str
     side: str
